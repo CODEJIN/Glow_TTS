@@ -1,0 +1,35 @@
+Sound:
+    Spectrogram_Dim: 1025
+    Mel_Dim: 80
+    Frame_Length: 1024
+    Frame_Shift: 256
+    Sample_Rate: 16000
+    Mel_F_Min: 0
+    Mel_F_Max: 8000
+    Max_Abs_Mel: 4
+    Confidence_Threshold: 0.6
+    Gaussian_Smoothing_Sigma: 0.0
+    Quantinized_Pitch_Dim: 256
+    
+Encoder:
+    Channels: 192
+    Embedding_Tokens: 28
+    Prenet: # Conv -> Norm -> ReLU -> Dropout
+        Kernel_Size: 5
+        Dropout_Rate: 0.5
+        Stacks: 3
+    Transformer:    # Attention -> Dropout -> Norm -> Conv -> Relu ->  Dropout -> Conv -> Dropout -> Norm
+        Attention_Head: 2
+        Conv:
+            Kernel_Size: 3
+            Calc_Channels: 768   #Ch -> Calc_Ch -> Ch
+        Dropout_Rate: 0.1
+        Stacks: 6
+    
+    Duration_Predictor:
+        Kernel_Size: 3
+        Channels: 256
+        Stacks: 2
+
+Decoder:
+    Stack: 12
