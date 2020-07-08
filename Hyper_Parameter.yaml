@@ -33,3 +33,4 @@ Encoder:
 
 Decoder:
     Stack: 12
+    Num_Squeeze: 2
