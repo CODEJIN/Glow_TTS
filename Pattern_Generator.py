@@ -7,12 +7,44 @@ from random import shuffle
 from tqdm import tqdm
 
 from Audio import Audio_Prep, Mel_Generate
+from yin import pitch_calc
 
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 using_Extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
+regex_Checker = re.compile('[A-Z,.?!\'\-\s]+')
 top_DB_Dict = {'LJ': 60, 'BC2013': 60, 'VCTK': 15, 'VC1': 23, 'VC2': 23, 'Libri': 23, 'CMUA': 60}  # VC1 and Libri is from 'https://github.com/CorentinJ/Real-Time-Voice-Cloning'
+
+def Text_Filtering(text):
+    remove_Letter_List = ['(', ')', '\"', '[', ']', ':', ';']
+    replace_List = [('  ', ' '), (' ,', ','), ('\' ', '\'')]
+
+    text = text.upper().strip()
+    for filter in remove_Letter_List:
+        text= text.replace(filter, '')
+    for filter, replace_STR in replace_List:
+        text= text.replace(filter, replace_STR)
+
+    text= text.strip()
+
+    if len(regex_Checker.findall(text)) > 1:
+        return None
+    elif text.startswith('\''):
+        return None
+    else:
+        return regex_Checker.findall(text)[0]
+
+def Pitch_Generate(audio):
+    pitch = pitch_calc(
+        sig= audio,
+        sr= hp_Dict['Sound']['Sample_Rate'],
+        w_len= hp_Dict['Sound']['Frame_Length'],
+        w_step= hp_Dict['Sound']['Frame_Shift'],
+        confidence_threshold= hp_Dict['Sound']['Confidence_Threshold'],
+        gaussian_smoothing_sigma = hp_Dict['Sound']['Gaussian_Smoothing_Sigma']
+        )
+    return (pitch - np.min(pitch)) / (np.max(pitch) - np.min(pitch) + 1e-7)
 
 def Pattern_Generate(path, top_db= 60):
     audio = Audio_Prep(path, hp_Dict['Sound']['Sample_Rate'], top_db)
@@ -27,19 +59,27 @@ def Pattern_Generate(path, top_db= 60):
         mel_fmax= hp_Dict['Sound']['Mel_F_Max'],
         max_abs_value= hp_Dict['Sound']['Max_Abs_Mel']
         )
+    pitch = Pitch_Generate(audio)
 
-    return audio, mel
+    return audio, mel, pitch
 
-def Pattern_File_Generate(path, speaker_ID, speaker, dataset, tag=''):
-    audio, mel = Pattern_Generate(path, top_DB_Dict[dataset])
-    
-    new_Pattern_Dict = {
-        'Audio': audio.astype(np.float32),
-        'Mel': mel.astype(np.float32),
-        'Speaker_ID': speaker_ID,
-        'Speaker': speaker,
-        'Dataset': dataset,
-        }
+def Pattern_File_Generate(path, speaker_ID, speaker, dataset, text= None, tag=''):
+    try:
+        audio, mel, pitch = Pattern_Generate(path, top_DB_Dict[dataset])
+        assert mel.shape[0] == pitch.shape[0], 'Mel_shape != Pitch_shape {} != {}'.format(mel.shape, pitch.shape)
+        new_Pattern_Dict = {
+            'Audio': audio.astype(np.float32),
+            'Mel': mel.astype(np.float32),
+            'Pitch': pitch.astype(np.float32),
+            'Speaker_ID': speaker_ID,
+            'Speaker': speaker,
+            'Dataset': dataset,
+            }
+        if not text is None:
+            new_Pattern_Dict['Text'] = text
+    except Exception as e:
+        print('Error: {} in {}'.format(e, path))
+        return
 
     file = '{}.{}{}.PICKLE'.format(
         speaker if dataset in speaker else '{}.{}'.format(dataset, speaker),
@@ -47,12 +87,12 @@ def Pattern_File_Generate(path, speaker_ID, speaker, dataset, tag=''):
         os.path.splitext(os.path.basename(path))[0]
         ).upper()
 
-    os.makedirs(os.path.join(hp_Dict['Train']['Pattern_Path'], dataset).replace('\\', '/'), exist_ok= True)    
+    os.makedirs(os.path.join(hp_Dict['Train']['Pattern_Path'], dataset).replace('\\', '/'), exist_ok= True)
     with open(os.path.join(hp_Dict['Train']['Pattern_Path'], dataset, file).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_Pattern_Dict, f, protocol=4)
 
 
-def LJ_Info_Load(path):
+def LJ_Info_Load(path, use_text= False):
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -60,16 +100,27 @@ def LJ_Info_Load(path):
             if not os.path.splitext(file)[1].upper() in using_Extension:
                 continue
             paths.append(file)
-            
+
+    text_Dict = {}
+    if use_text:        
+        for line in open(os.path.join(path, 'metadata.csv').replace('\\', '/'), 'r', encoding= 'utf-8').readlines():
+            file, _, text = line.strip().split('|')
+            text = Text_Filtering(text)
+            if text is None:
+                continue            
+            text_Dict[os.path.join(path, 'wavs', '{}.wav'.format(file)).replace('\\', '/')] = text
+        
+        paths = list(text_Dict.keys())
+
     speaker_Dict = {
         path: 'LJ'
         for path in paths
         }
 
     print('LJ info generated: {}'.format(len(paths)))
-    return paths, speaker_Dict
+    return paths, text_Dict, speaker_Dict
 
-def BC2013_Info_Load(path):
+def BC2013_Info_Load(path, use_text= False):
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -77,6 +128,14 @@ def BC2013_Info_Load(path):
             if not os.path.splitext(file)[1].upper() in using_Extension:
                 continue
             paths.append(file)
+
+    text_Dict = {}
+    if use_text:
+        for path in paths:
+            text = Text_Filtering(open(path.replace('wav', 'txt'), 'r').readlines()[0].strip())
+            if not text is None:
+                text_Dict[path] = text
+        paths = list(text_Dict.keys())
 
     speaker_Dict = {
         path: 'BC2013'
@@ -84,9 +143,9 @@ def BC2013_Info_Load(path):
         }
 
     print('BC2013 info generated: {}'.format(len(paths)))
-    return paths, speaker_Dict
+    return paths, text_Dict, speaker_Dict
 
-def CMUA_Info_Load(path):
+def CMUA_Info_Load(path, use_text= False):
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -94,16 +153,31 @@ def CMUA_Info_Load(path):
             if not os.path.splitext(file)[1].upper() in using_Extension:
                 continue
             paths.append(file)
-            
+
+    text_Dict = {}
+    if use_text:
+        for root, _, _ in os.walk(path):
+            if not os.path.exists(os.path.join(root, 'txt.done.data')):
+                continue
+            for line in open(os.path.join(root, 'txt.done.data'), 'r').readlines():
+                file, text, _ = line.strip().split('"')
+                file = file.strip().split(' ')[1]
+                path = os.path.join(root.replace('etc', 'wav'), '{}.wav'.format(file)).replace('\\', '/')                
+                text = Text_Filtering(text)
+                if not text is None:
+                    text_Dict[path] = text
+
+        paths = list(text_Dict.keys())
+
     speaker_Dict = {
         path: 'CMUA.{}'.format(path.split('/')[-3].split('_')[2].upper())
         for path in paths
         }
 
     print('CMUA info generated: {}'.format(len(paths)))
-    return paths, speaker_Dict
+    return paths, text_Dict, speaker_Dict
 
-def VCTK_Info_Load(path):
+def VCTK_Info_Load(path, use_text= False):
     path = os.path.join(path, 'wav48').replace('\\', '/')
     try:
         with open(os.path.join(path, 'VCTK.NonOutlier.txt').replace('\\', '/'), 'r') as f:
@@ -122,15 +196,21 @@ def VCTK_Info_Load(path):
 
             paths.append(file)
 
+    text_Dict = {}
+    if use_text:
+        for path in paths:
+            text_Dict[path] = Text_Filtering(open(path.replace('wav48', 'txt').replace('wav', 'txt'), 'r').readlines()[0])
+        paths = list(text_Dict.keys())
+
     speaker_Dict = {
         path: 'VCTK.{}'.format(path.split('/')[-2].upper())
         for path in paths
         }
 
     print('VCTK info generated: {}'.format(len(paths)))
-    return paths, speaker_Dict
+    return paths, text_Dict, speaker_Dict
 
-def Libri_Info_Load(path):
+def Libri_Info_Load(path, use_text= False):
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -138,14 +218,22 @@ def Libri_Info_Load(path):
             if not os.path.splitext(file)[1].upper() in using_Extension:
                 continue
             paths.append(file)
-            
+
+    text_Dict = {}
+    if use_text:
+        for path in paths:
+            text = Text_Filtering(open('{}.normalized.txt'.format(os.path.splitext(path)[0]), 'r').readlines()[0])
+            if not text is None:
+                text_Dict[path] = text
+        paths = list(text_Dict.keys())
+
     speaker_Dict = {
         path: 'Libri.{:04d}'.format(int(path.split('/')[-3].upper()))
         for path in paths
         }
 
     print('Libri info generated: {}'.format(len(paths)))
-    return paths, speaker_Dict
+    return paths, text_Dict, speaker_Dict
 
 def Speaker_Index_Dict_Generate(speaker_Dict):
     return {
@@ -153,6 +241,10 @@ def Speaker_Index_Dict_Generate(speaker_Dict):
         for index, speaker in enumerate(sorted(set(speaker_Dict.values())))
         }
 
+def Split_Eval(paths, eval_ratio= 0.001):
+    shuffle(paths)
+    index = int(len(paths) * eval_ratio)
+    return paths[index:], paths[:index]
 
 def Metadata_Generate():
     new_Metadata_Dict = {
@@ -201,59 +293,81 @@ if __name__ == '__main__':
     argParser.add_argument("-vctk", "--vctk_path", required=False)
     argParser.add_argument("-libri", "--libri_path", required=False)
     
+    argParser.add_argument("-text", "--use_text", action= 'store_true')
+    argParser.add_argument("-eval", "--eval_ratio", default= 0.001, type= float)
     argParser.add_argument("-mw", "--max_worker", default= 10, required=False, type= int)
 
     args = argParser.parse_args()
 
-    path_List = []
+    paths = []
+    text_Dict = {}
     speaker_Dict = {}
     dataset_Dict = {}
     tag_Dict = {}
 
     if not args.lj_path is None:
-        lj_Paths, lj_Speaker_Dict = LJ_Info_Load(path= args.lj_path)
-        path_List.extend(lj_Paths)
+        lj_Paths, lj_Text_Dict, lj_Speaker_Dict = LJ_Info_Load(path= args.lj_path, use_text= args.use_text)
+        paths.extend(lj_Paths)
+        text_Dict.update(lj_Text_Dict)
         speaker_Dict.update(lj_Speaker_Dict)
         dataset_Dict.update({path: 'LJ' for path in lj_Paths})
         tag_Dict.update({path: '' for path in lj_Paths})
     if not args.bc2013_path is None:
-        bc2013_Paths, bc2013_Speaker_Dict = BC2013_Info_Load(path= args.bc2013_path)
-        path_List.extend(bc2013_Paths)
+        bc2013_Paths, bc2013_Text_Dict, bc2013_Speaker_Dict = BC2013_Info_Load(path= args.bc2013_path, use_text= args.use_text)
+        paths.extend(bc2013_Paths)
+        text_Dict.update(bc2013_Text_Dict)
         speaker_Dict.update(bc2013_Speaker_Dict)
         dataset_Dict.update({path: 'BC2013' for path in bc2013_Paths})
-        tag_Dict.update({path: '' for path in bc2013_Paths})        
+        tag_Dict.update({path: '' for path in bc2013_Paths})
     if not args.cmua_path is None:
-        cmua_Paths, cmua_Speaker_Dict = CMUA_Info_Load(path= args.cmua_path)
-        path_List.extend(cmua_Paths)
+        cmua_Paths, cuma_Text_Dict, cmua_Speaker_Dict = CMUA_Info_Load(path= args.cmua_path, use_text= args.use_text)
+        paths.extend(cmua_Paths)
+        text_Dict.update(cuma_Text_Dict)
         speaker_Dict.update(cmua_Speaker_Dict)
         dataset_Dict.update({path: 'CMUA' for path in cmua_Paths})
-        tag_Dict.update({path: '' for path in cmua_Paths})        
+        tag_Dict.update({path: '' for path in cmua_Paths})
     if not args.vctk_path is None:
-        vctk_Paths, vctk_Speaker_Dict = VCTK_Info_Load(path= args.vctk_path)
-        path_List.extend(vctk_Paths)
+        vctk_Paths, vctk_Text_Dict, vctk_Speaker_Dict = VCTK_Info_Load(path= args.vctk_path)
+        paths.extend(vctk_Paths)
+        text_Dict.update(vctk_Text_Dict)
         speaker_Dict.update(vctk_Speaker_Dict)
         dataset_Dict.update({path: 'VCTK' for path in vctk_Paths})
         tag_Dict.update({path: '' for path in vctk_Paths})
     if not args.libri_path is None:
-        libri_Paths, libri_Speaker_Dict = Libri_Info_Load(path= args.libri_path)
-        path_List.extend(libri_Paths)
+        libri_Paths, libri_Text_Dict, libri_Speaker_Dict = Libri_Info_Load(path= args.libri_path)
+        paths.extend(libri_Paths)
+        text_Dict.update(libri_Text_Dict)
         speaker_Dict.update(libri_Speaker_Dict)
         dataset_Dict.update({path: 'Libri' for path in libri_Paths})
         tag_Dict.update({path: '' for path in libri_Paths})
-    
 
-    if len(path_List) == 0:
+    if len(paths) == 0:
         raise ValueError('Total info count must be bigger than 0.')
-    
+
     speaker_Index_Dict = Speaker_Index_Dict_Generate(speaker_Dict)
+
+    train_Paths, eval_Paths = Split_Eval(paths, args.eval_ratio)
+    print(len(train_Paths))
+    print(len(eval_Paths))
+    assert False
 
     with PE(max_workers = args.max_worker) as pe:
         for _ in tqdm(
             pe.map(
                 lambda params: Pattern_File_Generate(*params),
-                [(path, speaker_Index_Dict[speaker_Dict[path]], speaker_Dict[path], dataset_Dict[path], tag_Dict[path]) for path in path_List]
+                [
+                    (
+                        path,
+                        speaker_Index_Dict[speaker_Dict[path]],
+                        speaker_Dict[path],
+                        dataset_Dict[path],
+                        text_Dict[path] if args.use_text else None,
+                        tag_Dict[path]
+                        )
+                    for path in paths
+                    ]
                 ),
-            total= len(path_List)
+            total= len(paths)
             ):
             pass
 
@@ -263,3 +377,4 @@ if __name__ == '__main__':
 
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -bc2013 "D:\Pattern\ENG\BC2013" -cmua "D:\Pattern\ENG\CMUA" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
 # python Pattern_Generator.py -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
+# python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -bc2013 "D:\Pattern\ENG\BC2013" -cmua "D:\Pattern\ENG\CMUA" -text

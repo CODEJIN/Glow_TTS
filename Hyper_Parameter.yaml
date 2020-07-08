@@ -4,8 +4,8 @@ Sound:
     Frame_Length: 1024
     Frame_Shift: 256
     Sample_Rate: 16000
-    Mel_F_Min: 0
-    Mel_F_Max: 8000
+    Mel_F_Min: 125
+    Mel_F_Max: 7600
     Max_Abs_Mel: 4
     Confidence_Threshold: 0.6
     Gaussian_Smoothing_Sigma: 0.0
@@ -42,4 +42,13 @@ Decoder:
             Kernel_Size: 5
             Dropout_Rate: 0.05
 
+Train:
+    Use_Pattern_Cache: true
+    Train_Pattern:
+        Path: 'C:/Pattern/GlowTTS.SR16K.Pattern/Train'
+        Metadata_File: 'METADATA.PICKLE'
+    Eval_Pattern:
+        Path: 'C:/Pattern/GlowTTS.SR16K.Pattern/Eval'
+        Metadata_File: 'METADATA.PICKLE'
+    Num_Workers: 2
 
