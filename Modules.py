@@ -5,7 +5,100 @@ import yaml, logging, math
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
-class Encoder(torch.nn.Module):
+class GlowTTS(torch.nn.Module):
+    def __init__(self):
+        super(GlowTTS, self).__init__()
+
+        self.layer_Dict = {}
+        self.layer_Dict['Encoder'] = Encoder()
+        self.layer_Dict['Decoder'] = Decoder()
+
+    def forward(self, tokens, token_lengths, mels= None, mel_lengths= None, noise_scale= 1.0, length_scale= 1.0, is_training= False):
+        if is_training:
+            return self.train(tokens, token_lengths, mels, mel_lengths)
+        else:
+            return self.inference(tokens, token_lengths, noise_scale, length_scale)
+
+    def train(self, tokens, token_lengths, mels, mel_lengths):
+        assert all(mel_lengths % hp_Dict['Decoder']['Num_Squeeze'] == 0), 'Mel lengths must be diviable by Num_Squeeze.'
+        token_Masks = self.Mask_Generate(token_lengths)
+        mean, log_Std, log_Durations, x_Mask = self.layer_Dict['Encoder'](tokens, token_Masks)
+
+        mel_Masks = self.Mask_Generate(mel_lengths)
+
+        attention_Masks = torch.unsqueeze(token_Masks, -1) * torch.unsqueeze(mel_Masks, 2)
+        attention_Masks = attention_Masks.squeeze(1)
+
+        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks)
+        
+        with torch.no_grad():
+            std_Square_R = torch.exp(-2 * log_Std)
+            # [Batch, Token_t, 1] [Batch, Token_t, Mel_t] [Batch, Token_t, Mel_t] [Batch, Token_t, 1]
+            log_P = \
+                torch.sum(-0.5 * math.log(2 * math.pi) - log_Std, dim= 1).unsqueeze(-1) + \
+                std_Square_R.transpose(2, 1) @ (-0.5 * (z ** 2)) + \
+                (mean * std_Square_R).transpose(2, 1) @ z + \
+                torch.sum(-0.5 * (mean ** 2) * std_Square_R, dim= 1).unsqueeze(-1)
+
+            attentions = 0?
+
+        mel_Mean = mean @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
+        mel_Log_Std = log_Std @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
+        log_Duration_Targets = torch.log(torch.sum(attentions.unsqueeze(1), dim= -1) + 1e-8) * token_Masks
+
+        return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets
+        
+        
+    def inference(self, tokens, token_lengths, noise_scale= 1.0, length_scale= 1.0):
+        token_Masks = self.Mask_Generate(token_lengths)
+        mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks)
+        
+        durations = torch.ceil(torch.exp(log_Durations) * mask * length_scale).squeeze(1)
+        mel_Lengths = torch.clamp_min(torch.sum(durations, dim= 1), 1.0).long()
+        mel_Masks = self.Mask_Generate(mel_Lengths)
+
+        attention_Masks = torch.unsqueeze(token_Masks, -1) * torch.unsqueeze(mel_Masks, 2)
+        attention_Masks = attention_Masks.squeeze(1)
+
+        attentions = self.Path_Generate(durations, attention_Masks) # [Batch, Token_t, Mel_t]
+
+        mel_Mean = mean @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
+        mel_Log_Std = log_Std @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
+        noises = torch.randn_like(mel_Mean) * noise_scale
+        
+        z = (mel_Mean + torch.exp(mel_Log_Std)) * noises * mel_Masks
+        
+        mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, reverse= True)
+
+        return mels
+
+    def Mask_Generate(self, lengths, max_lengths= None, dtype= torch.float):
+        '''
+        lengths: [Batch]
+        '''
+        mask = torch.arange(max_lengths or torch.max(lengths))[None, :] < lengths[:, None]    # [Batch, Time]
+        return mask.unsqueeze(1).to(dtype)  # [Batch, 1, Time]
+
+    def Path_Generate(self, durations, masks):
+        '''
+        durations: [Batch, Token_t]
+        masks: [Batch, Token_t, Mel_t]
+        '''
+        batch, token_Time, mel_Time = masks.size()
+        durations = torch.cumsum(durations, dim= 1)        
+        paths = self.Mask_Generate(
+            lengths= durations.view(-1),
+            max_lengths= mel_Time,
+            dtype= masks.dtype
+            ).to(device= masks.device)
+        paths = paths.view(batch, token_Time, mel_Time)
+        paths = paths - torch.nn.functional.pad(paths, [0,0,1,0,0,0])[:, :-1]
+        paths = paths * masks
+
+        return paths
+
+
+class Encoder(torch.nn.Module): 
     def __init__(self):
         super(Encoder, self).__init__()
 
@@ -25,28 +118,23 @@ class Encoder(torch.nn.Module):
             )
         self.layer_Dict['Duration_Predictor'] = Duration_Predictor()
 
-    def forward(self, x, lengths):
+    def forward(self, x, mask):
         '''
         x: [Batch, Time]
         lengths: [Batch]
         '''
-        x = self.layer_Dict['Embedding'](x).transpose(2, 1) * math.sqrt(hp_Dict['Encoder']['Channels']) # [Batch, Dim, Time]
-        
-        mask = torch.arange(x.size(2))[None, :] < lengths[:, None]  # [Batch, Time]
-        mask = mask.unsqueeze(1)    # [Batch, 1, Time]
-        mask = mask.to(x.dtype) # [Batch, 1, Time]
-
+        x = self.layer_Dict['Embedding'](x).transpose(2, 1) * math.sqrt(hp_Dict['Encoder']['Channels']) # [Batch, Dim, Time]        
         x = self.layer_Dict['Prenet'](x, mask)
         x = self.layer_Dict['Transformer'](x, mask)
 
-        mean, log_S = torch.split(
+        mean, log_Std = torch.split(
             self.layer_Dict['Project'](x) * mask,
             [hp_Dict['Sound']['Mel_Dim'], hp_Dict['Sound']['Mel_Dim']],
             dim= 1
             )
-        log_W = self.layer_Dict['Duration_Predictor'](x.detach(), mask)
+        log_Durations = self.layer_Dict['Duration_Predictor'](x.detach(), mask)
 
-        return mean, log_S, log_W, mask
+        return mean, log_Std, log_Durations, mask
 
 class Decoder(torch.nn.Module):
     def __init__(self):
@@ -63,14 +151,25 @@ class Decoder(torch.nn.Module):
     def forward(self, x, mask, reverse= False):
         x, mask = self.layer_Dict['Squeeze'](x, mask)
 
-        logdets = []        
+        log_Dets = []
         for flow in  reversed(self.layer_Dict['Flows']) if reverse else self.layer_Dict['Flows']:
-            x, logdet = flow(x, mask, reverse= reverse)
-            logdets.extend(logdet)
-
+            x, logdet = flow(x, mask, reverse= reverse)            
+            log_Dets.extend(logdet)
+        
         x, mask = self.layer_Dict['Unsqueeze'](x, mask)
 
-        return x, (None if reverse else torch.sum(torch.stack(logdets), dim= 0))
+        return x, (None if reverse else torch.sum(torch.stack(log_Dets), dim= 0))
+
+# class Loss(torch.nn.Module):
+#     def __init__(self):
+#         pass
+
+#     def forward(self):
+#         0.5 * math.log(2 * math.pi) + \
+#             (
+#                 torch.sum(y_logs) +
+#                 0.5 * torch.sum(torch.exp(-2 * y_logs) * (z - y_m) ** 2) - torch.sum(logdet)
+#                 ) / (torch.sum(y_lengths // hps.model.n_sqz) * hps.model.n_sqz * hps.data.n_mel_channels) 
 
 
 class Prenet(torch.nn.Module):
@@ -353,10 +452,6 @@ class Invertible_1x1_Conv(torch.nn.Module):
 
         if reverse:
             weight = torch.inverse(self.weight).to(dtype= self.weight.dtype)
-            print(torch.inverse(self.weight))
-            print(torch.inverse(self.weight.float()))
-            #Check the reason why float() is used.
-            assert False
             logdet = None
         else:
             weight = self.weight
@@ -519,21 +614,26 @@ class Unsqueeze(torch.nn.Module):
 
 
 
-    
-        
-
 if __name__ == "__main__":
-    # encoder = Encoder()
+    glowTTS = GlowTTS()
 
-    # x = torch.LongTensor([
-    #     [6,3,4,6,1,3,26,5,7,3,14,6,3,3,6,22,3],
-    #     [7,3,2,16,1,13,26,25,7,3,14,6,23,3,0,0,0],
-    #     ])
-    # lengths = torch.LongTensor([15, 12])
+    tokens = torch.LongTensor([
+        [6,3,4,6,1,3,26,5,7,3,14,6,3,3,6,22,3],
+        [7,3,2,16,1,13,26,25,7,3,14,6,23,3,0,0,0],
+        ])
+    token_lengths = torch.LongTensor([15, 17])
+    mels = torch.randn(2, 80, 156)
+    mel_lengths = torch.LongTensor([86, 156])
 
-    # encoder(x, lengths)
+    x = glowTTS(tokens, token_lengths, mels, mel_lengths, is_training= True)
+    print(x)
 
-    decoder = Decoder()
-    x = torch.randn(3, 80, 160)
-    y = decoder(x, None)
-    print(y[0].shape, y[1])
+
+    # decoder = Decoder()
+    # # x = torch.randn(3, 80, 156)
+    # # y = decoder(x, None)
+    # x = torch.randn(3, 80, 156)
+    # lengths = torch.LongTensor([141, 156, 92])
+    # y = decoder(x, lengths)
+
+    # print(y[0].shape, y[1])

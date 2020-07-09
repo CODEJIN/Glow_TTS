@@ -201,6 +201,8 @@ def VCTK_Info_Load(path, use_text= False):
     text_Dict = {}
     if use_text:
         for path in paths:
+            if 'p315'.upper() in path.upper():  #Officially, 'p315' text is lost in VCTK dataset.
+                continue
             text_Dict[path] = Text_Filtering(open(path.replace('wav48', 'txt').replace('wav', 'txt'), 'r').readlines()[0])
         paths = list(text_Dict.keys())
 
@@ -224,7 +226,7 @@ def Libri_Info_Load(path, use_text= False):
     text_Dict = {}
     if use_text:
         for path in paths:
-            text = Text_Filtering(open('{}.normalized.txt'.format(os.path.splitext(path)[0]), 'r').readlines()[0])
+            text = Text_Filtering(open('{}.normalized.txt'.format(os.path.splitext(path)[0]), 'r', encoding= 'utf-8').readlines()[0])
             if not text is None:
                 text_Dict[path] = text
         paths = list(text_Dict.keys())
@@ -277,7 +279,10 @@ def Metadata_Generate(eval= False, use_text= False):
 
             file = os.path.join(os.path.basename(root), file).replace("\\", "/")
             try:
-                if not all([key in ('Audio', 'Mel', 'Speaker_ID', 'Speaker', 'Dataset') for key in pattern_Dict.keys()]):
+                if not all([
+                    key in ('Audio', 'Mel', 'Pitch', 'Speaker_ID', 'Speaker', 'Dataset', 'Text' if use_text else '')
+                    for key in pattern_Dict.keys()
+                    ]):
                     continue
                 new_Metadata_Dict['Audio_Length_Dict'][file] = pattern_Dict['Audio'].shape[0]
                 new_Metadata_Dict['Mel_Length_Dict'][file] = pattern_Dict['Mel'].shape[0]
@@ -338,14 +343,14 @@ if __name__ == '__main__':
         dataset_Dict.update({path: 'CMUA' for path in cmua_Paths})
         tag_Dict.update({path: '' for path in cmua_Paths})
     if not args.vctk_path is None:
-        vctk_Paths, vctk_Text_Dict, vctk_Speaker_Dict = VCTK_Info_Load(path= args.vctk_path)
+        vctk_Paths, vctk_Text_Dict, vctk_Speaker_Dict = VCTK_Info_Load(path= args.vctk_path, use_text= args.use_text)
         paths.extend(vctk_Paths)
         text_Dict.update(vctk_Text_Dict)
         speaker_Dict.update(vctk_Speaker_Dict)
         dataset_Dict.update({path: 'VCTK' for path in vctk_Paths})
         tag_Dict.update({path: '' for path in vctk_Paths})
     if not args.libri_path is None:
-        libri_Paths, libri_Text_Dict, libri_Speaker_Dict = Libri_Info_Load(path= args.libri_path)
+        libri_Paths, libri_Text_Dict, libri_Speaker_Dict = Libri_Info_Load(path= args.libri_path, use_text= args.use_text)
         paths.extend(libri_Paths)
         text_Dict.update(libri_Text_Dict)
         speaker_Dict.update(libri_Speaker_Dict)
@@ -358,9 +363,9 @@ if __name__ == '__main__':
     speaker_Index_Dict = Speaker_Index_Dict_Generate(speaker_Dict)
 
     train_Paths, eval_Paths = Split_Eval(paths, args.eval_ratio)
-
+    
     with PE(max_workers = args.max_worker) as pe:
-        for _ in tqdm(
+        for _ in tqdm(            
             pe.map(
                 lambda params: Pattern_File_Generate(*params),
                 [
@@ -406,4 +411,4 @@ if __name__ == '__main__':
 
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -bc2013 "D:\Pattern\ENG\BC2013" -cmua "D:\Pattern\ENG\CMUA" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
 # python Pattern_Generator.py -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
-# python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -bc2013 "D:\Pattern\ENG\BC2013" -cmua "D:\Pattern\ENG\CMUA" -text
+# python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -text
