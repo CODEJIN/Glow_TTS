@@ -63,7 +63,9 @@ def Pattern_Generate(path, top_db= 60):
 
     return audio, mel, pitch
 
-def Pattern_File_Generate(path, speaker_ID, speaker, dataset, text= None, tag=''):
+def Pattern_File_Generate(path, speaker_ID, speaker, dataset, text= None, tag='', eval= False):
+    pattern_Path = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Path']
+
     try:
         audio, mel, pitch = Pattern_Generate(path, top_DB_Dict[dataset])
         assert mel.shape[0] == pitch.shape[0], 'Mel_shape != Pitch_shape {} != {}'.format(mel.shape, pitch.shape)
@@ -87,8 +89,8 @@ def Pattern_File_Generate(path, speaker_ID, speaker, dataset, text= None, tag=''
         os.path.splitext(os.path.basename(path))[0]
         ).upper()
 
-    os.makedirs(os.path.join(hp_Dict['Train']['Pattern_Path'], dataset).replace('\\', '/'), exist_ok= True)
-    with open(os.path.join(hp_Dict['Train']['Pattern_Path'], dataset, file).replace("\\", "/"), 'wb') as f:
+    os.makedirs(os.path.join(pattern_Path, dataset).replace('\\', '/'), exist_ok= True)
+    with open(os.path.join(pattern_Path, dataset, file).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_Pattern_Dict, f, protocol=4)
 
 
@@ -246,7 +248,10 @@ def Split_Eval(paths, eval_ratio= 0.001):
     index = int(len(paths) * eval_ratio)
     return paths[index:], paths[:index]
 
-def Metadata_Generate():
+def Metadata_Generate(eval= False, use_text= False):
+    pattern_Path = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Path']
+    metadata_File = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Metadata_File']
+
     new_Metadata_Dict = {
         'Spectrogram_Dim': hp_Dict['Sound']['Spectrogram_Dim'],
         'Mel_Dim': hp_Dict['Sound']['Mel_Dim'],
@@ -257,12 +262,15 @@ def Metadata_Generate():
         'File_List': [],
         'Audio_Length_Dict': {},
         'Mel_Length_Dict': {},
+        'Pitch_Length_Dict': {},        
         'Speaker_ID_Dict': {},
         'Speaker_Dict': {},
         'Dataset_Dict': {},
         }
+    if use_text:
+        new_Metadata_Dict['Text_Length_Dict'] = {}
 
-    for root, _, files in os.walk(hp_Dict['Train']['Pattern_Path']):
+    for root, _, files in os.walk(pattern_Path):
         for file in files:
             with open(os.path.join(root, file).replace("\\", "/"), "rb") as f:
                 pattern_Dict = pickle.load(f)
@@ -273,14 +281,17 @@ def Metadata_Generate():
                     continue
                 new_Metadata_Dict['Audio_Length_Dict'][file] = pattern_Dict['Audio'].shape[0]
                 new_Metadata_Dict['Mel_Length_Dict'][file] = pattern_Dict['Mel'].shape[0]
+                new_Metadata_Dict['Pitch_Length_Dict'][file] = pattern_Dict['Pitch'].shape[0]                
                 new_Metadata_Dict['Speaker_ID_Dict'][file] = pattern_Dict['Speaker_ID']
                 new_Metadata_Dict['Speaker_Dict'][file] = pattern_Dict['Speaker']
                 new_Metadata_Dict['Dataset_Dict'][file] = pattern_Dict['Dataset']
                 new_Metadata_Dict['File_List'].append(file)
+                if use_text:
+                    new_Metadata_Dict['Text_Length_Dict'][file] = len(pattern_Dict['Text'])
             except:
                 print('File \'{}\' is not correct pattern file. This file is ignored.'.format(file))
 
-    with open(os.path.join(hp_Dict['Train']['Pattern_Path'], hp_Dict['Train']['Metadata_File'].upper()).replace("\\", "/"), 'wb') as f:
+    with open(os.path.join(pattern_Path, metadata_File.upper()).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_Metadata_Dict, f, protocol= 4)
 
     print('Metadata generate done.')
@@ -347,9 +358,6 @@ if __name__ == '__main__':
     speaker_Index_Dict = Speaker_Index_Dict_Generate(speaker_Dict)
 
     train_Paths, eval_Paths = Split_Eval(paths, args.eval_ratio)
-    print(len(train_Paths))
-    print(len(eval_Paths))
-    assert False
 
     with PE(max_workers = args.max_worker) as pe:
         for _ in tqdm(
@@ -362,16 +370,37 @@ if __name__ == '__main__':
                         speaker_Dict[path],
                         dataset_Dict[path],
                         text_Dict[path] if args.use_text else None,
-                        tag_Dict[path]
+                        tag_Dict[path],
+                        False
                         )
-                    for path in paths
+                    for path in train_Paths
                     ]
                 ),
-            total= len(paths)
+            total= len(train_Paths)
+            ):
+            pass
+        for _ in tqdm(
+            pe.map(
+                lambda params: Pattern_File_Generate(*params),
+                [
+                    (
+                        path,
+                        speaker_Index_Dict[speaker_Dict[path]],
+                        speaker_Dict[path],
+                        dataset_Dict[path],
+                        text_Dict[path] if args.use_text else None,
+                        tag_Dict[path],
+                        True
+                        )
+                    for path in eval_Paths
+                    ]
+                ),
+            total= len(eval_Paths)
             ):
             pass
 
-    Metadata_Generate()
+    Metadata_Generate(use_text= args.use_text)
+    Metadata_Generate(eval= True, use_text= args.use_text)
 
 
 
