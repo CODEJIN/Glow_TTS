@@ -1,0 +1,31 @@
+Text	Length_Scale
+Birds of a feather flock together.	0.6
+Birds of a feather flock together.	0.8
+Birds of a feather flock together.	1
+Birds of a feather flock together.	1.2
+Birds of a feather flock together.	1.4
+A creative artist works on his next composition because he was not satisfied with his previous one.	0.6
+A creative artist works on his next composition because he was not satisfied with his previous one.	0.8
+A creative artist works on his next composition because he was not satisfied with his previous one.	1
+A creative artist works on his next composition because he was not satisfied with his previous one.	1.2
+A creative artist works on his next composition because he was not satisfied with his previous one.	1.4
+Death is like a fisherman who catches fish in his net and leaves them for a while in the water. The fish is still swimming but the net is around him, and the fisherman will draw him up.	0.6
+Death is like a fisherman who catches fish in his net and leaves them for a while in the water. The fish is still swimming but the net is around him, and the fisherman will draw him up.	0.8
+Death is like a fisherman who catches fish in his net and leaves them for a while in the water. The fish is still swimming but the net is around him, and the fisherman will draw him up.	1
+Death is like a fisherman who catches fish in his net and leaves them for a while in the water. The fish is still swimming but the net is around him, and the fisherman will draw him up.	1.2
+Death is like a fisherman who catches fish in his net and leaves them for a while in the water. The fish is still swimming but the net is around him, and the fisherman will draw him up.	1.4
+Where do I come from and where are I going.	0.6
+Where do I come from and where are I going.	0.8
+Where do I come from and where are I going.	1
+Where do I come from and where are I going.	1.2
+Where do I come from and where are I going.	1.4
+Where do I come from and where are I going?	0.6
+Where do I come from and where are I going?	0.8
+Where do I come from and where are I going?	1
+Where do I come from and where are I going?	1.2
+Where do I come from and where are I going?	1.4
+Where do I come from and where are I going!	0.6
+Where do I come from and where are I going!	0.8
+Where do I come from and where are I going!	1
+Where do I come from and where are I going!	1.2
+Where do I come from and where are I going!	1.4

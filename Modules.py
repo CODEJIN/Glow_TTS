@@ -12,6 +12,7 @@ class GlowTTS(torch.nn.Module):
         self.layer_Dict = {}
         self.layer_Dict['Encoder'] = Encoder()
         self.layer_Dict['Decoder'] = Decoder()
+        self.layer_Dict['Maximum_Path_Generater'] = Maximum_Path_Generater()
 
     def forward(self, tokens, token_lengths, mels= None, mel_lengths= None, noise_scale= 1.0, length_scale= 1.0, is_training= False):
         if is_training:
@@ -40,7 +41,7 @@ class GlowTTS(torch.nn.Module):
                 (mean * std_Square_R).transpose(2, 1) @ z + \
                 torch.sum(-0.5 * (mean ** 2) * std_Square_R, dim= 1).unsqueeze(-1)
 
-            attentions = 0?
+            attentions = self.layer_Dict['Maximum_Path_Generater'](log_P, attention_Masks)
 
         mel_Mean = mean @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
         mel_Log_Std = log_Std @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
@@ -159,17 +160,6 @@ class Decoder(torch.nn.Module):
         x, mask = self.layer_Dict['Unsqueeze'](x, mask)
 
         return x, (None if reverse else torch.sum(torch.stack(log_Dets), dim= 0))
-
-# class Loss(torch.nn.Module):
-#     def __init__(self):
-#         pass
-
-#     def forward(self):
-#         0.5 * math.log(2 * math.pi) + \
-#             (
-#                 torch.sum(y_logs) +
-#                 0.5 * torch.sum(torch.exp(-2 * y_logs) * (z - y_m) ** 2) - torch.sum(logdet)
-#                 ) / (torch.sum(y_lengths // hps.model.n_sqz) * hps.model.n_sqz * hps.data.n_mel_channels) 
 
 
 class Prenet(torch.nn.Module):
@@ -612,6 +602,69 @@ class Unsqueeze(torch.nn.Module):
         return x * mask, mask
 
 
+class Maximum_Path_Generater(torch.nn.Module):
+    def forward(self, log_p, mask):
+        '''
+        x: [Batch, Token_t, Mel_t]
+        mask: [Batch, Token_t, Mel_t]
+        '''
+        log_p *= mask
+        device, dtype = log_p.device, log_p.dtype
+        log_p = log_p.data.cpu().numpy().astype(np.float32)
+        mask = mask.data.cpu().numpy()
+
+        token_Lengths = np.sum(mask, axis= 1)[:, 0].astype(np.int32)   # [Batch]
+        mel_Lengths = np.sum(mask, axis= 2)[:, 0].astype(np.int32)   # [Batch]
+
+        paths = calc_paths(log_p, token_Lengths, mel_Lengths)
+
+        return torch.from_numpy(paths).to(device= device, dtype= dtype)
+
+    def calc_paths(log_p, token_lengths, mel_lengths):
+        return np.stack([
+            calc_path(x, token_Length, mel_Length)
+            for x, token_Length, mel_Length in zip(log_p, token_lengths, mel_lengths)
+            ], axis= 0)
+
+        assert False, 'Change to parallel'
+             
+
+    def calc_path(x, token_length, mel_length):
+        assert False, 'Check this process!'
+
+        path = np.zeros_like(x).astype(np.int32)
+
+        for mel_Index in range(mel_length):
+            for token_Index in range(max(0, token_length + mel_Index - mel_length), min(token_length, mel_Index + 1)):
+                if mel_Index == token_Index:
+                    current_Q = -1e+9
+                else:
+                    current_Q = x[token_Index, mel_Index - 1]   # Stayed current token
+                if token_Index == 0:
+                    if mel_Index == 0:
+                        prev_Q = 0.0
+                    else:
+                        prev_Q = -1e+9
+                else:
+                    prev_Q = x[token_Index - 1, mel_Index - 1]  # Moved to next token
+            x[token_Index, mel_Index] = max(current_Q, prev_Q) + x[token_Index, mel_Index]
+
+        token_Index = token_length - 1
+        for mel_Index in range(mel_length - 1, -1, -1):
+            path[token_Index, mel_Index] = 1
+            if token_Index == mel_Index or x[token_Index, mel_Index - 1] < x[token_Index - 1, mel_Index - 1]:
+                token_Index = max(0, token_Index - 1)
+
+        return path
+
+
+class MLE_Loss(torch.nn.modules.loss._Loss):
+    def forward(self, mean, std, log_dets, lengths):
+        # loss_MLE = 0.5 * math.log(2 * math.pi)    # I ignore this part because this does not affect to the gradients.
+        loss = torch.sum(std) + 0.5 * torch.sum(torch.exp(-2 * std) * (z - mean) ** 2) - torch.sum(log_dets)
+        loss /= torch.sum(lengths // hp_Dict['Decoder']['Num_Squeeze']) * hp_Dict['Decoder']['Num_Squeeze'] * hp_Dict['Sound']['Mel_Dim']
+
+        return loss
 
 
 if __name__ == "__main__":
