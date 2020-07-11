@@ -1,17 +1,21 @@
 import torch
 import numpy as np
-import yaml, pickle, os, math
+import yaml, pickle, os, math, logging
 from random import shuffle
-#from Pattern_Generator import Pattern_Generate
-from Pattern_Generator_Replication import Pattern_Generate
+
+from Pattern_Generator import Text_Filtering
 
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
+with open(hp_Dict['Token_Path']) as f:
+    token_Dict = yaml.load(f, Loader=yaml.Loader)
+
 def Text_to_Token(text):
-    return
-def Token_to_Text(token):
-    return
+    return np.array([
+        token_Dict[letter]
+        for letter in ['<S>'] + list(text) + ['<E>']
+        ], dtype= np.int32)
 
 class Train_Dataset(torch.utils.data.Dataset):
     def __init__(self):
@@ -39,7 +43,7 @@ class Train_Dataset(torch.utils.data.Dataset):
 
         file = self.file_List[idx]
         dataset = self.dataset_Dict[file]
-        path = os.path.join(hp_Dict['Train']['Train_Pattern']['Path'], dataset, file).replace('\\', '/')
+        path = os.path.join(hp_Dict['Train']['Train_Pattern']['Path'], file).replace('\\', '/')
         pattern_Dict = pickle.load(open(path, 'rb'))
         pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel']
 
@@ -77,7 +81,7 @@ class Dev_Dataset(torch.utils.data.Dataset):
 
         file = self.file_List[idx]
         dataset = self.dataset_Dict[file]
-        path = os.path.join(hp_Dict['Train']['Eval_Pattern']['Path'], dataset, file).replace('\\', '/')
+        path = os.path.join(hp_Dict['Train']['Eval_Pattern']['Path'], file).replace('\\', '/')
         pattern_Dict = pickle.load(open(path, 'rb'))
         pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel']
 
@@ -93,11 +97,14 @@ class Inference_Dataset(torch.utils.data.Dataset):
     def __init__(self, pattern_path= 'Inference_Text.txt'):
         super(Inference_Dataset, self).__init__()
 
-        self.pattern_List = [
-            (line.strip().split('\t')[0], float(line.strip().split('\t')[1]))
-            for line in open(pattern_path, 'r').readlines()[1:]
-            ]
-        
+        self.pattern_List = []
+        for index, line in enumerate(open(pattern_path, 'r').readlines()[1:]):            
+            text, length_Scale = Text_Filtering(line.strip().split('\t')[0]), float(line.strip().split('\t')[1])
+            if text is None or text == '':                
+                logging.warn('The text of line {} in \'{}\' is incorrect. This line is ignoired.'.format(index + 1, pattern_path))
+                continue
+            self.pattern_List.append((text, length_Scale))
+
         self.cache_Dict = {}
 
     def __getitem__(self, idx):
@@ -106,7 +113,7 @@ class Inference_Dataset(torch.utils.data.Dataset):
 
         text, length_Scale = self.pattern_List[idx]
 
-        pattern = text, length_Scale
+        pattern = Text_to_Token(text), length_Scale, text
 
         if hp_Dict['Train']['Use_Pattern_Cache']:
             self.cache_Dict[idx] = pattern
@@ -123,6 +130,10 @@ class Collater:
             (token, mel)
             for token, mel  in batch
             ])
+        mels = [
+            mel[:(mel.shape[0] // hp_Dict['Decoder']['Num_Squeeze'] * hp_Dict['Decoder']['Num_Squeeze'])]
+            for mel in mels
+            ]
         token_Lengths = [token.shape[0] for token in tokens]
         mel_Lengths = [mel.shape[0] for mel in mels]
 
@@ -140,11 +151,11 @@ class Collater:
         max_Mel_Length = max([mel.shape[0] for mel in mels])
 
         tokens = np.stack(
-            [np.pad(token, [0, max_Token_Length - token.shape[0]]) for token in tokens],
+            [np.pad(token, [0, max_Token_Length - token.shape[0]], constant_values= token_Dict['<E>']) for token in tokens],
             axis= 0
             )
         mels = np.stack(
-            [np.pad(mel, [[0, max_Mel_Length - mel.shape[0]], [0, 0]], constant_values= token_Index_Dict['<E>']) for mel in mels],
+            [np.pad(mel, [[0, max_Mel_Length - mel.shape[0]], [0, 0]], constant_values= -hp_Dict['Sound']['Max_Abs_Mel']) for mel in mels],
             axis= 0
             )
 
@@ -152,9 +163,9 @@ class Collater:
 
 class Inference_Collater:
     def __call__(self, batch):
-        tokens, length_Scales = zip(*[
-            (token, length_Scale)
-            for token, length_Scale  in batch
+        tokens, length_Scales, texts = zip(*[
+            (token, length_Scale, text)
+            for token, length_Scale, text  in batch
             ])
         token_Lengths = [token.shape[0] for token in tokens]
 
@@ -164,9 +175,9 @@ class Inference_Collater:
         token_Lengths = torch.LongTensor(token_Lengths)   # [Batch]
         length_Scales = torch.FloatTensor(length_Scales)
 
-        return tokens, token_Lengths, length_Scales
+        return tokens, token_Lengths, length_Scales, texts
 
-    def Stacks(self, tokens):
+    def Stack(self, tokens):
         max_Token_Length = max([token.shape[0] for token in tokens])        
         tokens = np.stack(
             [np.pad(token, [0, max_Token_Length - token.shape[0]]) for token in tokens],

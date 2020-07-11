@@ -128,3 +128,4 @@ dmypy.json
 # Pyre type checker
 .pyre/
 glow-tts-master
+monotonic_align/core.c

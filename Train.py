@@ -30,7 +30,7 @@ else:
 
 logging.basicConfig(
         level=logging.INFO, stream=sys.stdout,
-        format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s"
+        format= '%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s'
         )
 
 if hp_Dict['Use_Mixed_Precision']:
@@ -46,11 +46,12 @@ if hp_Dict['Use_Mixed_Precision']:
 class Trainer:
     def __init__(self, steps= 0):
         self.steps = steps
+        self.epochs = 0
 
         self.Datset_Generate()
         self.Model_Generate()
 
-        self.loss_Dict = {
+        self.scalar_Dict = {
             'Train': defaultdict(float),
             'Evaluation': defaultdict(float),
             }
@@ -98,16 +99,17 @@ class Trainer:
             num_workers= hp_Dict['Train']['Num_Workers'],
             pin_memory= True
             )
-        
+
     def Model_Generate(self):
         self.model_Dict = {
-            'SpeechSplit': SpeechSplit().to(device)
+            'GlowTTS': GlowTTS().to(device)
             }
         self.criterion_Dict = {
-            'MSE': torch.nn.MSELoss().to(device)
+            'MSE': torch.nn.MSELoss().to(device),
+            'MLE': MLE_Loss().to(device)
             }
         self.optimizer = torch.optim.Adam(
-            params= self.model_Dict['SpeechSplit'].parameters(),
+            params= self.model_Dict['GlowTTS'].parameters(),
             lr= hp_Dict['Train']['Learning_Rate']['Initial'],
             betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
             eps= hp_Dict['Train']['ADAM']['Epsilon'],
@@ -119,30 +121,39 @@ class Trainer:
             )
 
         if hp_Dict['Use_Mixed_Precision']:
-            self.model_Dict['SpeechSplit'], self.optimizer = amp.initialize(
-                models=self.model_Dict['SpeechSplit'],
+            self.model_Dict['GlowTTS'], self.optimizer = amp.initialize(
+                models=self.model_Dict['GlowTTS'],
                 optimizers=self.optimizer
                 )
 
-        logging.info(self.model_Dict['SpeechSplit'])
+        logging.info(self.model_Dict['GlowTTS'])
 
 
-    def Train_Step(self, speakers, mels, pitches, factors):
+    def Train_Step(self, tokens, token_lengths, mels, mel_lengths):
         loss_Dict = {}
 
-        speakers = speakers.to(device)
+        tokens = tokens.to(device)
+        token_lengths = token_lengths.to(device)
         mels = mels.to(device)
-        pitches = pitches.to(device)
+        mel_lengths = mel_lengths.to(device)
 
-        reconstructions = self.model_Dict['SpeechSplit'](
-            rhymes= mels,
-            contents= mels,
-            pitches= pitches,
-            speakers= speakers,
-            random_resampling_factors= factors
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
+            tokens= tokens,
+            token_lengths= token_lengths,
+            mels= mels,
+            mel_lengths= mel_lengths,
+            is_training= True
             )
 
-        loss_Dict['Loss'] = self.criterion_Dict['MSE'](mels, reconstructions)
+        loss_Dict['MLE'] = self.criterion_Dict['MLE'](
+            z= z,
+            mean= mel_Mean,
+            std= mel_Log_Std,
+            log_dets= log_Dets,
+            lengths= mel_lengths
+            )
+        loss_Dict['Length'] = self.criterion_Dict['MSE'](log_Durations, log_Duration_Targets)
+        loss_Dict['Loss'] = loss_Dict['MLE'] + loss_Dict['Length']
 
         self.optimizer.zero_grad()
         if hp_Dict['Use_Mixed_Precision']:            
@@ -151,7 +162,7 @@ class Trainer:
         else:
             loss_Dict['Loss'].backward()        
         torch.nn.utils.clip_grad_norm_(
-            parameters= self.model_Dict['SpeechSplit'].parameters(),
+            parameters= self.model_Dict['GlowTTS'].parameters(),
             max_norm= hp_Dict['Train']['Gradient_Norm']
             )
         self.optimizer.step()
@@ -160,22 +171,23 @@ class Trainer:
         self.tqdm.update(1)
 
         for tag, loss in loss_Dict.items():
-            self.loss_Dict['Train'][tag] += loss
+            self.scalar_Dict['Train'][tag] += loss
 
     def Train_Epoch(self):
-        for speakers, mels, pitches, factors in self.dataLoader_Dict['Train']:
-            self.Train_Step(speakers, mels, pitches, factors)
+        for tokens, token_Lengths, mels, mel_Lengths in self.dataLoader_Dict['Train']:
+            self.Train_Step(tokens, token_Lengths, mels, mel_Lengths)
             
             if self.steps % hp_Dict['Train']['Checkpoint_Save_Interval'] == 0:
                 self.Save_Checkpoint()
 
-            if self.steps % hp_Dict['Train']['Logging_Interval'] == 0:
-                self.loss_Dict['Train'] = {
+            if self.steps % hp_Dict['Train']['Logging_Interval'] == 0:                
+                self.scalar_Dict['Train'] = {
                     tag: loss / hp_Dict['Train']['Logging_Interval']
-                    for tag, loss in self.loss_Dict['Train'].items()
-                    }
-                self.Write_to_Tensorboard('Train', self.loss_Dict['Train'])
-                self.loss_Dict['Train'] = defaultdict(float)
+                    for tag, loss in self.scalar_Dict['Train'].items()
+                        }
+                self.scalar_Dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()
+                self.Write_to_Tensorboard('Train', self.scalar_Dict['Train'])
+                self.scalar_Dict['Train'] = defaultdict(float)
 
             if self.steps % hp_Dict['Train']['Evaluation_Interval'] == 0:
                 self.Evaluation_Epoch()
@@ -189,25 +201,34 @@ class Trainer:
         self.epochs += hp_Dict['Train']['Train_Pattern']['Accumulated_Dataset_Epoch']
 
     @torch.no_grad()
-    def Evaluation_Step(self, speakers, mels, pitches, factors):
+    def Evaluation_Step(self, tokens, token_lengths, mels, mel_lengths):
         loss_Dict = {}
 
-        speakers = speakers.to(device)
+        tokens = tokens.to(device)
+        token_lengths = token_lengths.to(device)
         mels = mels.to(device)
-        pitches = pitches.to(device)
+        mel_lengths = mel_lengths.to(device)
 
-        reconstructions = self.model_Dict['SpeechSplit'](
-            rhymes= mels,
-            contents= mels,
-            pitches= pitches,
-            speakers= speakers,
-            random_resampling_factors= factors
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
+            tokens= tokens,
+            token_lengths= token_lengths,
+            mels= mels,
+            mel_lengths= mel_lengths,
+            is_training= True
             )
 
-        loss_Dict['Loss'] = self.criterion_Dict['MSE'](mels, reconstructions)
+        loss_Dict['MLE'] = self.criterion_Dict['MLE'](
+            z= z,
+            mean= mel_Mean,
+            std= mel_Log_Std,
+            log_dets= log_Dets,
+            lengths= mel_lengths
+            )
+        loss_Dict['Length'] = self.criterion_Dict['MSE'](log_Durations, log_Duration_Targets)
+        loss_Dict['Loss'] = loss_Dict['MLE'] + loss_Dict['Length']
 
         for tag, loss in loss_Dict.items():
-            self.loss_Dict['Evaluation'][tag] += loss
+            self.scalar_Dict['Evaluation'][tag] += loss
     
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
@@ -215,135 +236,97 @@ class Trainer:
         for model in self.model_Dict.values():
             model.eval()
 
-        for step, (speakers, mels, pitches, factors) in tqdm(
+        for step, (tokens, token_Lengths, mels, mel_Lengths) in tqdm(
             enumerate(self.dataLoader_Dict['Dev'], 1),
             desc='[Evaluation]',
             total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp_Dict['Train']['Batch_Size'])
             ):
-            self.Evaluation_Step(speakers, mels, pitches, factors)
+            self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths)
 
-        self.loss_Dict['Evaluation'] = {
+        self.scalar_Dict['Evaluation'] = {
             tag: loss / step
-            for tag, loss in self.loss_Dict['Evaluation'].items()
+            for tag, loss in self.scalar_Dict['Evaluation'].items()
             }
-        self.Write_to_Tensorboard('Evaluation', self.loss_Dict['Evaluation'])
-        self.loss_Dict['Evaluation'] = defaultdict(float)
+        self.Write_to_Tensorboard('Evaluation', self.scalar_Dict['Evaluation'])
+        self.scalar_Dict['Evaluation'] = defaultdict(float)
 
         for model in self.model_Dict.values():
             model.train()
 
 
     @torch.no_grad()
-    def Inference_Step(self, speakers, rhymes, contents, pitches, rhyme_Labels, content_Labels, pitch_Labels, lengths, start_Index= 0, tag_Step= False, tag_Index= False):
-        speakers = speakers.to(device)
-        rhymes = rhymes.to(device)
-        contents = contents.to(device)
-        pitches = pitches.to(device)
+    def Inference_Step(self, tokens, token_lengths, length_scales, texts, start_index= 0, tag_step= False):
+        tokens = tokens.to(device)
+        token_lengths = token_lengths.to(device)
+        length_scales = length_scales.to(device)
 
-        reconstructions = self.model_Dict['SpeechSplit'](
-            rhymes= rhymes,
-            contents= contents,
-            pitches= pitches,
-            speakers= speakers
+        mels, attentions = self.model_Dict['GlowTTS'](
+            tokens= tokens,
+            token_lengths= token_lengths,
+            length_scale= length_scales,
+            is_training= False
             )
-
         
-        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG').replace("\\", "/"), exist_ok= True)
-        for index, (speaker, rhyme, content, pitch, reconstruction, rhyme_Label, content_Label, pitch_Label, length) in enumerate(zip(
-            speakers.cpu().numpy(),
-            rhymes.cpu().numpy(),
-            contents.cpu().numpy(),
-            pitches.cpu().numpy(),
-            reconstructions.cpu().numpy(),
-            rhyme_Labels,
-            content_Labels,
-            pitch_Labels,
-            lengths
+        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG').replace('\\', '/'), exist_ok= True)
+        for index, (mel, attention, text, length_Scale) in enumerate(zip(
+            mels.cpu().numpy(),
+            attentions.cpu().numpy(),
+            texts,
+            length_scales
             )):
-            title = 'Converted_Speaker: {}    Rhyme: {}    Content: {}    Pitch: {}'.format(speaker, rhyme_Label, content_Label, pitch_Label)            
-            new_Figure = plt.figure(figsize=(20, 5 * 4), dpi=100)
-            plt.subplot(411)
-            plt.imshow(rhyme[:, :length], aspect='auto', origin='lower')
-            plt.title('Rhyme mel    {}'.format(title))
+            new_Figure = plt.figure(figsize=(20, 5 * 3), dpi=100)
+            plt.subplot2grid((3, 1), (0, 0))
+            plt.imshow(mel, aspect='auto', origin='lower')
+            plt.title('Mel    Text: {}    Length scale: {:.3f}'.format(text if len(text) < 90 else text[:90] + '…', length_Scale))
             plt.colorbar()
-            plt.subplot(412)
-            plt.imshow(content[:, :length], aspect='auto', origin='lower')
-            plt.title('Content mel    {}'.format(title))
-            plt.colorbar()
-            plt.subplot(413)
-            plt.plot(pitch[:length])
-            plt.margins(x=0)
-            plt.title('Pitch    {}'.format(title))
-            plt.colorbar()
-            plt.subplot(414)
-            plt.imshow(reconstruction[:, :length], aspect='auto', origin='lower')
-            plt.title('Reconstruction mel    {}'.format(title))
+            plt.subplot2grid((3, 1), (1, 0), rowspan= 2)
+            plt.imshow(attention[:len(text) + 2], aspect='auto', origin='lower')
+            plt.title('Attention    Text: {}    Length scale: {:.3f}'.format(text if len(text) < 90 else text[:90] + '…', length_Scale))
+            plt.yticks(
+                range(len(text) + 2),
+                ['<S>'] + list(text) + ['<E>'],
+                fontsize = 10
+                )
             plt.colorbar()
             plt.tight_layout()
-            file = '{}S_{}.R_{}.C_{}.P_{}{}.PNG'.format(
-                'Step-{}.'.format(self.steps) if tag_Step else '',
-                speaker,
-                rhyme_Label,
-                content_Label,
-                pitch_Label,
-                '.IDX_{}'.format(index + start_Index) if tag_Index else ''
+            file = '{}.IDX_{}.PNG'.format(
+                'Step-{}.'.format(self.steps) if tag_step else '',
+                index + start_index
                 )
-            plt.savefig(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG', file).replace("\\", "/"))
+            plt.savefig(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG', file).replace('\\', '/'))
             plt.close(new_Figure)
 
         if 'PWGAN' in self.model_Dict.keys():
-            os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV').replace("\\", "/"), exist_ok= True)
+            os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
 
-            noises = torch.randn(reconstructions.size(0), reconstructions.size(2) * hp_Dict['Sound']['Frame_Shift']).to(device)
-            reconstructions = torch.nn.functional.pad(
-                reconstructions,
+            noises = torch.randn(mels.size(0), mels.size(2) * hp_Dict['Sound']['Frame_Shift']).to(device)
+            mels = torch.nn.functional.pad(
+                mels,
                 pad= (hp_Dict['WaveNet']['Upsample']['Pad'], hp_Dict['WaveNet']['Upsample']['Pad']),
                 mode= 'replicate'
                 )
 
-            for index, (audio, speaker, rhyme_Label, content_Label, pitch_Label, length) in enumerate(zip(
-                self.model_Dict['PWGAN'](noises, reconstructions).cpu().numpy(),
-                speakers.cpu().numpy(),
-                rhyme_Labels,
-                content_Labels,
-                pitch_Labels,
-                lengths
-                )):
-                file = '{}S_{}.R_{}.C_{}.P_{}{}.WAV'.format(
-                    'Step-{}.'.format(self.steps) if tag_Step else '',
-                    speaker,
-                    rhyme_Label,
-                    content_Label,
-                    pitch_Label,
-                    '.IDX_{}'.format(index + start_Index) if tag_Index else ''
+            for index, audio in enumerate(self.model_Dict['PWGAN'](noises, mels).cpu().numpy()):
+                file = '{}.IDX_{}.WAV'.format(
+                    'Step-{}.'.format(self.steps) if tag_step else '',
+                    index + start_index
                     )
                 wavfile.write(
-                    filename= os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV', file).replace("\\", "/"),
-                    data= (np.clip(audio[:length * hp_Dict['Sound']['Frame_Shift']], -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
+                    filename= os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV', file).replace('\\', '/'),
+                    data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
                     rate= hp_Dict['Sound']['Sample_Rate']
                     )
         else:
-            os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace("\\", "/"), exist_ok= True)
+            os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
 
-            for index, (reconstruction, speaker, rhyme_Label, content_Label, pitch_Label, length) in enumerate(zip(
-                reconstructions.cpu().numpy(),
-                speakers.cpu().numpy(),
-                rhyme_Labels,
-                content_Labels,
-                pitch_Labels,
-                lengths
-                )):
-                file = '{}S_{}.R_{}.C_{}.P_{}{}.NPY'.format(
-                    'Step-{}.'.format(self.steps) if tag_Step else '',
-                    speaker,
-                    rhyme_Label,
-                    content_Label,
-                    pitch_Label,
-                    '.IDX_{}'.format(index + start_Index) if tag_Index else ''
+            for index, mel in enumerate(mels.cpu().numpy()):
+                file = '{}.IDX_{}.NPY'.format(
+                    'Step-{}.'.format(self.steps) if tag_step else '',
+                    index + start_index
                     )
                 np.save(
-                    os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY', file).replace("\\", "/"),
-                    reconstruction,
+                    os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
+                    mel.T,
                     allow_pickle= False
                     )
 
@@ -353,12 +336,12 @@ class Trainer:
         for model in self.model_Dict.values():
             model.eval()
 
-        for step, (speakers, rhymes, contents, pitches, rhyme_Labels, content_Labels, pitch_Labels, lengths) in tqdm(
+        for step, (tokens, token_lengths, length_scales, texts) in tqdm(
             enumerate(self.dataLoader_Dict['Inference']),
             desc='[Inference]',
             total= math.ceil(len(self.dataLoader_Dict['Inference'].dataset) / hp_Dict['Train']['Batch_Size'])
             ):
-            self.Inference_Step(speakers, rhymes, contents, pitches, rhyme_Labels, content_Labels, pitch_Labels, lengths, start_Index= step * hp_Dict['Train']['Batch_Size'])
+            self.Inference_Step(tokens, token_lengths, length_scales, texts, start_index= step * hp_Dict['Train']['Batch_Size'])
 
         for model in self.model_Dict.values():
             model.train()
@@ -379,7 +362,7 @@ class Trainer:
             path = os.path.join(hp_Dict['Checkpoint_Path'], 'S_{}.pt'.format(self.steps).replace('\\', '/'))
 
         state_Dict = torch.load(path, map_location= 'cpu')
-        self.model_Dict['SpeechSplit'].load_state_dict(state_Dict['Model']['SpeechSplit'])
+        self.model_Dict['GlowTTS'].load_state_dict(state_Dict['Model']['GlowTTS'])
         self.optimizer.load_state_dict(state_Dict['Optimizer'])
         self.scheduler.load_state_dict(state_Dict['Scheduler'])
         self.steps = state_Dict['Steps']
@@ -391,6 +374,9 @@ class Trainer:
             else:                
                 amp.load_state_dict(state_Dict['AMP'])
 
+        for flow in self.model_Dict['GlowTTS'].layer_Dict['Decoder'].layer_Dict['Flows']:
+            flow.layers[0].initialized = True   # Activation_Norm is already initialized when checkpoint is loaded.
+
         logging.info('Checkpoint loaded at {} steps.'.format(self.steps))
 
     def Save_Checkpoint(self):
@@ -398,7 +384,7 @@ class Trainer:
 
         state_Dict = {
             'Model': {
-                'SpeechSplit': self.model_Dict['SpeechSplit'].state_dict()
+                'GlowTTS': self.model_Dict['GlowTTS'].state_dict()
                 },
             'Optimizer': self.optimizer.state_dict(),
             'Scheduler': self.scheduler.state_dict(),            

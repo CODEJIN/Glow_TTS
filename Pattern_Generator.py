@@ -27,8 +27,8 @@ def Text_Filtering(text):
         text= text.replace(filter, replace_STR)
 
     text= text.strip()
-
-    if len(regex_Checker.findall(text)) > 1:
+    
+    if len(regex_Checker.findall(text)) != 1:
         return None
     elif text.startswith('\''):
         return None
@@ -301,6 +301,25 @@ def Metadata_Generate(eval= False, use_text= False):
 
     print('Metadata generate done.')
 
+def Token_Dict_Generate(text_Dict):
+    tokens = set()
+    for text in text_Dict.values():
+        tokens = tokens.union(set(text))    
+
+    os.makedirs(os.path.dirname(hp_Dict['Token_Path']), exist_ok= True)
+    #I don't use yaml.dump in this case to sort clearly.
+    yaml.dump(
+        {token: index for index, token in enumerate(['<S>', '<E>'] + sorted(tokens))},
+        open(hp_Dict['Token_Path'], 'w')
+        )
+    
+    # #I don't use yaml.dump in this case to sort clearly.
+    # os.makedirs(os.path.dirname(hp_Dict['Token_Path']), exist_ok= True)
+    # open(hp_Dict['Token_Path'], 'w').write('\n'.join([
+    #     '\'{}\': {}'.format(token, index)
+    #     for index, token in enumerate(['<S>', '<E>'] + sorted(tokens))
+    #     ]))
+
 if __name__ == '__main__':
     argParser = argparse.ArgumentParser()
     argParser.add_argument("-lj", "--lj_path", required=False)
@@ -359,6 +378,9 @@ if __name__ == '__main__':
 
     if len(paths) == 0:
         raise ValueError('Total info count must be bigger than 0.')
+
+    Token_Dict_Generate(text_Dict)
+    assert False
 
     speaker_Index_Dict = Speaker_Index_Dict_Generate(speaker_Dict)
 

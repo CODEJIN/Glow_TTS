@@ -9,18 +9,18 @@ class GlowTTS(torch.nn.Module):
     def __init__(self):
         super(GlowTTS, self).__init__()
 
-        self.layer_Dict = {}
+        self.layer_Dict = torch.nn.ModuleDict()
         self.layer_Dict['Encoder'] = Encoder()
         self.layer_Dict['Decoder'] = Decoder()
         self.layer_Dict['Maximum_Path_Generater'] = Maximum_Path_Generater()
 
     def forward(self, tokens, token_lengths, mels= None, mel_lengths= None, noise_scale= 1.0, length_scale= 1.0, is_training= False):
         if is_training:
-            return self.train(tokens, token_lengths, mels, mel_lengths)
+            return self.forward_train(tokens, token_lengths, mels, mel_lengths)
         else:
-            return self.inference(tokens, token_lengths, noise_scale, length_scale)
+            return self.forward_inference(tokens, token_lengths, noise_scale, length_scale)
 
-    def train(self, tokens, token_lengths, mels, mel_lengths):
+    def forward_train(self, tokens, token_lengths, mels, mel_lengths):
         assert all(mel_lengths % hp_Dict['Decoder']['Num_Squeeze'] == 0), 'Mel lengths must be diviable by Num_Squeeze.'
         token_Masks = self.Mask_Generate(token_lengths)
         mean, log_Std, log_Durations, x_Mask = self.layer_Dict['Encoder'](tokens, token_Masks)
@@ -48,12 +48,14 @@ class GlowTTS(torch.nn.Module):
         log_Duration_Targets = torch.log(torch.sum(attentions.unsqueeze(1), dim= -1) + 1e-8) * token_Masks
 
         return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets
-        
-        
-    def inference(self, tokens, token_lengths, noise_scale= 1.0, length_scale= 1.0):
+
+    def forward_inference(self, tokens, token_lengths, noise_scale= 1.0, length_scale= 1.0):
         token_Masks = self.Mask_Generate(token_lengths)
         mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks)
         
+        if isinstance(length_scale, torch.Tensor):
+            length_scale = length_scale.unsqueeze(-1).unsqueeze(-1)
+
         durations = torch.ceil(torch.exp(log_Durations) * mask * length_scale).squeeze(1)
         mel_Lengths = torch.clamp_min(torch.sum(durations, dim= 1), 1.0).long()
         mel_Masks = self.Mask_Generate(mel_Lengths)
@@ -71,13 +73,13 @@ class GlowTTS(torch.nn.Module):
         
         mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, reverse= True)
 
-        return mels
+        return mels, attentions
 
     def Mask_Generate(self, lengths, max_lengths= None, dtype= torch.float):
         '''
         lengths: [Batch]
         '''
-        mask = torch.arange(max_lengths or torch.max(lengths))[None, :] < lengths[:, None]    # [Batch, Time]
+        mask = torch.arange(max_lengths or torch.max(lengths))[None, :].to(lengths.device) < lengths[:, None]    # [Batch, Time]
         return mask.unsqueeze(1).to(dtype)  # [Batch, 1, Time]
 
     def Path_Generate(self, durations, masks):
@@ -124,7 +126,7 @@ class Encoder(torch.nn.Module):
         x: [Batch, Time]
         lengths: [Batch]
         '''
-        x = self.layer_Dict['Embedding'](x).transpose(2, 1) * math.sqrt(hp_Dict['Encoder']['Channels']) # [Batch, Dim, Time]        
+        x = self.layer_Dict['Embedding'](x).transpose(2, 1) * math.sqrt(hp_Dict['Encoder']['Channels']) # [Batch, Dim, Time]
         x = self.layer_Dict['Prenet'](x, mask)
         x = self.layer_Dict['Transformer'](x, mask)
 
@@ -603,6 +605,12 @@ class Unsqueeze(torch.nn.Module):
 
 
 class Maximum_Path_Generater(torch.nn.Module):
+    def __init__(self):
+        super(Maximum_Path_Generater, self).__init__()
+        if hp_Dict['Use_Cython_Alignment']:
+            import monotonic_align
+            self.forward = monotonic_align.maximum_path
+
     def forward(self, log_p, mask):
         '''
         x: [Batch, Token_t, Mel_t]
@@ -616,24 +624,18 @@ class Maximum_Path_Generater(torch.nn.Module):
         token_Lengths = np.sum(mask, axis= 1)[:, 0].astype(np.int32)   # [Batch]
         mel_Lengths = np.sum(mask, axis= 2)[:, 0].astype(np.int32)   # [Batch]
 
-        paths = calc_paths(log_p, token_Lengths, mel_Lengths)
+        paths = self.calc_paths(log_p, token_Lengths, mel_Lengths)
 
         return torch.from_numpy(paths).to(device= device, dtype= dtype)
 
-    def calc_paths(log_p, token_lengths, mel_lengths):
+    def calc_paths(self, log_p, token_lengths, mel_lengths):
         return np.stack([
-            calc_path(x, token_Length, mel_Length)
+            self.calc_path(x, token_Length, mel_Length)
             for x, token_Length, mel_Length in zip(log_p, token_lengths, mel_lengths)
             ], axis= 0)
 
-        assert False, 'Change to parallel'
-             
-
-    def calc_path(x, token_length, mel_length):
-        assert False, 'Check this process!'
-
+    def calc_path(self, x, token_length, mel_length):
         path = np.zeros_like(x).astype(np.int32)
-
         for mel_Index in range(mel_length):
             for token_Index in range(max(0, token_length + mel_Index - mel_length), min(token_length, mel_Index + 1)):
                 if mel_Index == token_Index:
@@ -659,7 +661,7 @@ class Maximum_Path_Generater(torch.nn.Module):
 
 
 class MLE_Loss(torch.nn.modules.loss._Loss):
-    def forward(self, mean, std, log_dets, lengths):
+    def forward(self, z, mean, std, log_dets, lengths):
         # loss_MLE = 0.5 * math.log(2 * math.pi)    # I ignore this part because this does not affect to the gradients.
         loss = torch.sum(std) + 0.5 * torch.sum(torch.exp(-2 * std) * (z - mean) ** 2) - torch.sum(log_dets)
         loss /= torch.sum(lengths // hp_Dict['Decoder']['Num_Squeeze']) * hp_Dict['Decoder']['Num_Squeeze'] * hp_Dict['Sound']['Mel_Dim']
@@ -678,9 +680,17 @@ if __name__ == "__main__":
     mels = torch.randn(2, 80, 156)
     mel_lengths = torch.LongTensor([86, 156])
 
-    x = glowTTS(tokens, token_lengths, mels, mel_lengths, is_training= True)
-    print(x)
+    # x = glowTTS(tokens, token_lengths, mels, mel_lengths, is_training= True)
+    # print(x)
 
+    mels, attentions = glowTTS(tokens, token_lengths, is_training= False)
+
+    import matplotlib.pyplot as plt
+    plt.subplot(211)    
+    plt.imshow(mels.detach().cpu().numpy()[0], aspect='auto', origin='lower')
+    plt.subplot(212)
+    plt.imshow(attentions.cpu().numpy()[0], aspect='auto', origin='lower')
+    plt.show()
 
     # decoder = Decoder()
     # # x = torch.randn(3, 80, 156)

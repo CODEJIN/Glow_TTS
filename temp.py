@@ -1,37 +1,44 @@
-import torch
+# import re
 
-class LayerNorm(torch.nn.Module):
-  def __init__(self, channels, eps=1e-4):
-      super().__init__()
-      self.channels = channels
-      self.eps = eps
+# regex_Checker = re.compile('[A-Z,.?!\'\-\s]+')
 
-      self.gamma = torch.nn.Parameter(torch.ones(channels))
-      self.beta = torch.nn.Parameter(torch.zeros(channels))
+# def Text_Filtering(text):
+#     remove_Letter_List = ['(', ')', '\"', '[', ']', ':', ';']
+#     replace_List = [('  ', ' '), (' ,', ','), ('\' ', '\'')]
 
-  def forward(self, x):
-    n_dims = len(x.shape)
-    mean = torch.mean(x, 1, keepdim=True)
-    variance = torch.mean((x -mean)**2, 1, keepdim=True)
+#     text = text.upper().strip()
+#     for filter in remove_Letter_List:
+#         text= text.replace(filter, '')
+#     for filter, replace_STR in replace_List:
+#         text= text.replace(filter, replace_STR)
 
-    x = (x - mean) * torch.rsqrt(variance + self.eps)
+#     text= text.strip()
 
-    shape = [1, -1] + [1] * (n_dims - 2)
-    x = x * self.gamma.view(*shape) + self.beta.view(*shape)
+#     if len(regex_Checker.findall(text)) > 1:
+#         return None
+#     elif text.startswith('\''):
+#         return None
+#     else:
+#         return regex_Checker.findall(text)[0]
+
+
+
+# tokens = set()
+# for line in open("C:\Pattern\LJSpeech\metadata.csv", 'r', encoding= 'utf-8').readlines():
+#     text = Text_Filtering(line.strip().split('|')[2])    
+#     if text is None:
+#         continue
+#     tokens = tokens.union(set(text))
+
+# print(sorted(tokens))
+
+
+import asyncio
+
+async def f(x):
+    x = await (x + 1)
     return x
 
-if __name__ == "__main__":
-    conv = torch.nn.Conv1d(16, 8, 3, 1, 1)
-    ln1 = torch.nn.LayerNorm(8, eps= 1e-4)
-    ln2 = LayerNorm(8)
-
-    x = torch.randn(3, 16, 5)
-    x = conv(x)
-    y1 = ln1(x.transpose(2,1)).transpose(2,1)
-    y2 = ln2(x)
-
-    print(y1 - y2)
-
-    print(y1.shape)
-    print(y2.shape)
+futures = [f(x) for x in range(100)]
+asyncio.get_event_loop().run_until_complete(asyncio.wait(futures))
 
