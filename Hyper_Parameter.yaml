@@ -27,7 +27,6 @@ Encoder:
             Calc_Channels: 768   #Ch -> Calc_Ch -> Ch
         Dropout_Rate: 0.1
         Stacks: 6
-    
     Duration_Predictor:
         Kernel_Size: 3
         Channels: 256

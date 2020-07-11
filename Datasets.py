@@ -180,7 +180,7 @@ class Inference_Collater:
     def Stack(self, tokens):
         max_Token_Length = max([token.shape[0] for token in tokens])        
         tokens = np.stack(
-            [np.pad(token, [0, max_Token_Length - token.shape[0]]) for token in tokens],
+            [np.pad(token, [0, max_Token_Length - token.shape[0]], constant_values= token_Dict['<E>']) for token in tokens],
             axis= 0
             )
 
