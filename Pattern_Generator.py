@@ -380,7 +380,6 @@ if __name__ == '__main__':
         raise ValueError('Total info count must be bigger than 0.')
 
     Token_Dict_Generate(text_Dict)
-    assert False
 
     speaker_Index_Dict = Speaker_Index_Dict_Generate(speaker_Dict)
 

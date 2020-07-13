@@ -266,7 +266,7 @@ class Trainer:
             length_scale= length_scales,
             is_training= False
             )
-        
+
         os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG').replace('\\', '/'), exist_ok= True)
         for index, (mel, attention, text, length_Scale) in enumerate(zip(
             mels.cpu().numpy(),
@@ -289,7 +289,7 @@ class Trainer:
                 )
             plt.colorbar()
             plt.tight_layout()
-            file = '{}.IDX_{}.PNG'.format(
+            file = '{}IDX_{}.PNG'.format(
                 'Step-{}.'.format(self.steps) if tag_step else '',
                 index + start_index
                 )
@@ -307,7 +307,7 @@ class Trainer:
                 )
 
             for index, audio in enumerate(self.model_Dict['PWGAN'](noises, mels).cpu().numpy()):
-                file = '{}.IDX_{}.WAV'.format(
+                file = '{}IDX_{}.WAV'.format(
                     'Step-{}.'.format(self.steps) if tag_step else '',
                     index + start_index
                     )
@@ -320,7 +320,7 @@ class Trainer:
             os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
 
             for index, mel in enumerate(mels.cpu().numpy()):
-                file = '{}.IDX_{}.NPY'.format(
+                file = '{}IDX_{}.NPY'.format(
                     'Step-{}.'.format(self.steps) if tag_step else '',
                     index + start_index
                     )

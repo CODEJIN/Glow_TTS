@@ -340,7 +340,7 @@ class CRND(torch.nn.Module):
             hp_Dict['Encoder']['Duration_Predictor']['Channels']
             )
         self.layer_Dict['Dropout'] = torch.nn.Dropout(
-            p= hp_Dict['Encoder']['Prenet']['Dropout_Rate']
+            p= hp_Dict['Encoder']['Duration_Predictor']['Dropout_Rate']
             )
 
     def forward(self, x, mask):
