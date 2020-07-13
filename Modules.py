@@ -662,9 +662,9 @@ class Maximum_Path_Generater(torch.nn.Module):
 
 class MLE_Loss(torch.nn.modules.loss._Loss):
     def forward(self, z, mean, std, log_dets, lengths):
-        # loss_MLE = 0.5 * math.log(2 * math.pi)    # I ignore this part because this does not affect to the gradients.
         loss = torch.sum(std) + 0.5 * torch.sum(torch.exp(-2 * std) * (z - mean) ** 2) - torch.sum(log_dets)
         loss /= torch.sum(lengths // hp_Dict['Decoder']['Num_Squeeze']) * hp_Dict['Decoder']['Num_Squeeze'] * hp_Dict['Sound']['Mel_Dim']
+        # loss_MLE += 0.5 * math.log(2 * math.pi)    # I ignore this part because this does not affect to the gradients.
 
         return loss
 

@@ -80,7 +80,7 @@ Train:
             Min: 10
             Max: 150
     Num_Workers: 2
-    Batch_Size: 16
+    Batch_Size: 24 #16
     Learning_Rate:
         Initial: 1.0e-3
         Decay_Step: 10000
