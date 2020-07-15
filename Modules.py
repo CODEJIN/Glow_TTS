@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import yaml, logging, math
 
+from MHA_RPR import MultiHeadAttention
+
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
@@ -239,10 +241,19 @@ class ANCRDCN(torch.nn.Module):
         super(ANCRDCN, self).__init__()
         self.layer_Dict = torch.nn.ModuleDict()
 
-        self.layer_Dict['Attention'] = torch.nn.MultiheadAttention(     # Require [Time, Batch, Dim]
-                embed_dim= hp_Dict['Encoder']['Channels'],
-                num_heads= hp_Dict['Encoder']['Transformer']['Attention_Head']
-                )
+        # self.layer_Dict['Attention'] = torch.nn.MultiheadAttention(     # Require [Time, Batch, Dim]
+        #         embed_dim= hp_Dict['Encoder']['Channels'],
+        #         num_heads= hp_Dict['Encoder']['Transformer']['Attention_Head']
+        #         )
+        self.layer_Dict['Attention'] = MultiHeadAttention(  # [Batch, Dim, Time]
+            channels= hp_Dict['Encoder']['Channels'],
+            out_channels= hp_Dict['Encoder']['Channels'],
+            n_heads= hp_Dict['Encoder']['Transformer']['Attention']['Head'],
+            window_size= hp_Dict['Encoder']['Transformer']['Attention']['Window_Size'],
+            p_dropout= hp_Dict['Encoder']['Transformer']['Attention']['Dropout_Rate'],
+            )
+
+
         self.layer_Dict['LayerNorm_0'] = torch.nn.LayerNorm(    # This normalize last dim...
             normalized_shape= hp_Dict['Encoder']['Channels']
             )   
@@ -273,21 +284,34 @@ class ANCRDCN(torch.nn.Module):
 
     def forward(self, x, mask):
         x *= mask
-        x = x.permute(2, 0, 1)  # [Time, Batch, Dim]
+        # x = x.permute(2, 0, 1)  # [Time, Batch, Dim]
+
+        # residual = x
+        # x = self.layer_Dict['Attention'](  # [Time, Batch, Dim]
+        #     query= x,
+        #     key= x,
+        #     value= x,
+        #     attn_mask= torch.repeat_interleave(     # Ver1.4 does not support this.
+        #         input= (mask * mask.transpose(2, 1)),
+        #         repeats= hp_Dict['Encoder']['Transformer']['Attention_Head'],
+        #         dim= 0
+        #         )
+        #     )[0]
+        # x = self.layer_Dict['Dropout'](x)
+        # x = self.layer_Dict['LayerNorm_0'](x + residual).permute(1, 2, 0) # [Batch, Dim, Time]
 
         residual = x
-        x = self.layer_Dict['Attention'](  # [Time, Batch, Dim]
-            query= x,
-            key= x,
-            value= x,
+        x = self.layer_Dict['Attention'](  # [Batch, Dim, Time]
+            x= x,
+            c= x,
             attn_mask= torch.repeat_interleave(     # Ver1.4 does not support this.
                 input= (mask * mask.transpose(2, 1)),
                 repeats= hp_Dict['Encoder']['Transformer']['Attention_Head'],
                 dim= 0
-                )
-            )[0]
+                ).unsqueeze(1)
+            )
         x = self.layer_Dict['Dropout'](x)
-        x = self.layer_Dict['LayerNorm_0'](x + residual).permute(1, 2, 0) # [Batch, Dim, Time]
+        x = self.layer_Dict['LayerNorm_0']((x + residual).transpose(2, 1)).transpose(2, 1) # [Batch, Dim, Time]
 
         residual = x
         x = self.layer_Dict['Conv_0'](x * mask)
