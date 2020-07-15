@@ -332,7 +332,7 @@ class Trainer:
             os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
 
             for index, mel in enumerate(mels.cpu().numpy()):
-                file = '{}IDX_{}.NPY'.format(
+                file = '{}IDX_{}'.format(
                     'Step-{}.'.format(self.steps) if tag_step else '',
                     index + start_index
                     )

@@ -59,8 +59,8 @@ WaveNet:
     Upsample:
         Scales: [4, 4, 4, 4]
         Pad: 2
-    # Checkpoint_Path: null
-    Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_322000.pkl'
+    Checkpoint_Path: null
+    # Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_322000.pkl'
 
 Token_Path: 'C:/Pattern/GlowTTS.SR16K.Pattern/Token.yaml'
 Train:
