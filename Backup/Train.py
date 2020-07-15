@@ -10,14 +10,11 @@ import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import sample
 
-from Backup.Modules import MLE_Loss
+from Modules import GlowTTS, MLE_Loss
 from Datasets import Train_Dataset, Dev_Dataset, Inference_Dataset, Collater, Inference_Collater
 from Noam_Scheduler import Noam_Scheduler
 
 from PWGAN.Modules import Generator as PWGAN
-
-from models import FlowGenerator as GlowTTS
-
 
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
@@ -109,29 +106,7 @@ class Trainer:
 
     def Model_Generate(self):
         self.model_Dict = {
-            'GlowTTS': GlowTTS(
-                n_vocab= hp_Dict['Encoder']['Embedding_Tokens'],
-                hidden_channels= hp_Dict['Encoder']['Channels'], 
-                filter_channels= hp_Dict['Encoder']['Transformer']['Conv']['Calc_Channels'], 
-                filter_channels_dp= hp_Dict['Encoder']['Duration_Predictor']['Channels'], 
-                out_channels= hp_Dict['Sound']['Mel_Dim'],
-                kernel_size= hp_Dict['Encoder']['Transformer']['Conv']['Kernel_Size'], 
-                n_heads= hp_Dict['Encoder']['Transformer']['Attention']['Heads'],
-                n_layers_enc= hp_Dict['Encoder']['Transformer']['Stacks'],
-                p_dropout= hp_Dict['Encoder']['Transformer']['Dropout_Rate'],
-                n_blocks_dec= hp_Dict['Decoder']['Stack'],
-                kernel_size_dec= hp_Dict['Decoder']['Affine_Coupling']["WaveNet"]['Kernel_Size'],
-                dilation_rate= 1, 
-                n_block_layers= hp_Dict['Decoder']['Affine_Coupling']["WaveNet"]['Num_Layers'],
-                p_dropout_dec= hp_Dict['Decoder']['Affine_Coupling']["WaveNet"]['Dropout_Rate'],
-                n_split= hp_Dict['Decoder']['Num_Split'],
-                n_sqz= hp_Dict['Decoder']['Num_Squeeze'],
-                window_size= hp_Dict['Encoder']['Transformer']['Attention']['Window_Size'],                
-                mean_only=False,
-                hidden_channels_enc= hp_Dict['Encoder']['Channels'],
-                hidden_channels_dec= hp_Dict['Encoder']['Channels'],
-                prenet= True
-                ).to(device)
+            'GlowTTS': GlowTTS().to(device)
             }
         self.criterion_Dict = {
             'MSE': torch.nn.MSELoss().to(device),
@@ -143,6 +118,11 @@ class Trainer:
             betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
             eps= hp_Dict['Train']['ADAM']['Epsilon'],
             )
+        # self.scheduler = torch.optim.lr_scheduler.StepLR(
+        #     optimizer= self.optimizer,
+        #     step_size= hp_Dict['Train']['Learning_Rate']['Decay_Step'],
+        #     gamma= hp_Dict['Train']['Learning_Rate']['Decay_Rate'],
+        #     )
         self.scheduler = Noam_Scheduler(
             optimizer= self.optimizer,
             warmup_steps= hp_Dict['Train']['Learning_Rate']['Warmup_Step']
@@ -165,8 +145,12 @@ class Trainer:
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
 
-        (z, mel_Mean, mel_Log_Std, log_Dets), _, log_Durations, log_Duration_Targets, _, _ = self.model_Dict['GlowTTS'](
-            tokens, token_lengths, mels, mel_lengths, gen=False
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
+            tokens= tokens,
+            token_lengths= token_lengths,
+            mels= mels,
+            mel_lengths= mel_lengths,
+            is_training= True
             )
 
         loss_Dict['MLE'] = self.criterion_Dict['MLE'](
@@ -237,8 +221,12 @@ class Trainer:
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
 
-        (z, mel_Mean, mel_Log_Std, log_Dets), _, log_Durations, log_Duration_Targets, _, _ = self.model_Dict['GlowTTS'](
-            tokens, token_lengths, mels, mel_lengths, gen=False
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
+            tokens= tokens,
+            token_lengths= token_lengths,
+            mels= mels,
+            mel_lengths= mel_lengths,
+            is_training= True
             )
 
         loss_Dict['MLE'] = self.criterion_Dict['MLE'](
@@ -289,10 +277,6 @@ class Trainer:
             token_lengths= token_lengths,
             length_scale= length_scales,
             is_training= False
-            )
-
-        (mels, *_), attentions, *_ = self.model_Dict['GlowTTS'](
-            tokens, token_lengths, gen=True, length_scales= length_scales
             )
 
         os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG').replace('\\', '/'), exist_ok= True)

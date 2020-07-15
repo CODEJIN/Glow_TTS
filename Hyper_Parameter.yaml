@@ -22,7 +22,7 @@ Encoder:
         Stacks: 3
     Transformer:    # Attention -> Dropout -> Norm -> Conv -> Relu ->  Dropout -> Conv -> Dropout -> Norm
         Attention:
-            Head: 2
+            Heads: 2
             Window_Size: 4
             Dropout_Rate: 0.1
         Conv:
