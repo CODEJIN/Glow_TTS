@@ -156,7 +156,7 @@ class Decoder(torch.nn.Module):
 
         log_Dets = []
         for flow in  reversed(self.layer_Dict['Flows']) if reverse else self.layer_Dict['Flows']:
-            x, logdet = flow(x, mask, reverse= reverse)            
+            x, logdet = flow(x, mask, reverse= reverse)
             log_Dets.extend(logdet)
         
         x, mask = self.layer_Dict['Unsqueeze'](x, mask)
@@ -272,7 +272,9 @@ class ANCRDCN(torch.nn.Module):
             )
 
     def forward(self, x, mask):
+        x *= mask
         x = x.permute(2, 0, 1)  # [Time, Batch, Dim]
+
         residual = x
         x = self.layer_Dict['Attention'](  # [Time, Batch, Dim]
             query= x,
@@ -291,7 +293,7 @@ class ANCRDCN(torch.nn.Module):
         x = self.layer_Dict['Conv_0'](x * mask)
         x = self.layer_Dict['ReLU'](x)
         x = self.layer_Dict['Dropout'](x)
-        x = self.layer_Dict['Conv_1'](x * mask)        
+        x = self.layer_Dict['Conv_1'](x * mask)
         x = self.layer_Dict['Dropout'](x)
 
         x = self.layer_Dict['LayerNorm_1']((x * mask + residual).transpose(2, 1)).transpose(2, 1)
@@ -404,7 +406,7 @@ class Activation_Norm(torch.nn.Module):
             mean = torch.sum(x * mask, [0, 2]) / denorm
             square = torch.sum(x * x * mask, [0, 2]) / denorm
             variance = square - (mean ** 2)
-            logs = 0.5 * torch.log(variance + 1e-7)
+            logs = 0.5 * torch.log(torch.clamp_min(variance, 1e-6))
 
             self.logs.data.copy_(
                 (-logs).view(*self.logs.shape).to(dtype=self.logs.dtype)
@@ -534,7 +536,6 @@ class WaveNet(torch.nn.Module):
             p= hp_Dict['Decoder']['Affine_Coupling']['WaveNet']['Dropout_Rate']
             )
 
-
     def forward(self, x, mask):
         output = torch.zeros_like(x)
 
@@ -555,8 +556,6 @@ class WaveNet(torch.nn.Module):
                 output += res_Skips
 
         return output * mask
-
-
 
     def fused_gate(self, x):
         tanh, sigmoid = torch.split(
@@ -664,7 +663,7 @@ class MLE_Loss(torch.nn.modules.loss._Loss):
     def forward(self, z, mean, std, log_dets, lengths):
         loss = torch.sum(std) + 0.5 * torch.sum(torch.exp(-2 * std) * (z - mean) ** 2) - torch.sum(log_dets)
         loss /= torch.sum(lengths // hp_Dict['Decoder']['Num_Squeeze']) * hp_Dict['Decoder']['Num_Squeeze'] * hp_Dict['Sound']['Mel_Dim']
-        # loss_MLE += 0.5 * math.log(2 * math.pi)    # I ignore this part because this does not affect to the gradients.
+        loss += 0.5 * math.log(2 * math.pi)    # I ignore this part because this does not affect to the gradients.
 
         return loss
 

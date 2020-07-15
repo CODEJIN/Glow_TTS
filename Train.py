@@ -12,8 +12,9 @@ from random import sample
 
 from Modules import GlowTTS, MLE_Loss
 from Datasets import Train_Dataset, Dev_Dataset, Inference_Dataset, Collater, Inference_Collater
+from Noam_Scheduler import Noam_Scheduler
 
-# from PWGAN.Modules import Generator as PWGAN
+from PWGAN.Modules import Generator as PWGAN
 
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
@@ -56,7 +57,10 @@ class Trainer:
             'Evaluation': defaultdict(float),
             }
 
-        self.writer = SummaryWriter(hp_Dict['Log_Path'])
+        self.writer_Dict = {
+            'Train': SummaryWriter(os.path.join(hp_Dict['Log_Path'], 'Train')),
+            'Evaluation': SummaryWriter(os.path.join(hp_Dict['Log_Path'], 'Evaluation')),
+            }
 
         if not hp_Dict['WaveNet']['Checkpoint_Path'] is None:
             self.PWGAN_Load_Checkpoint()
@@ -95,7 +99,7 @@ class Trainer:
             dataset= inference_Dataset,
             shuffle= False,
             collate_fn= inference_Collater,
-            batch_size= hp_Dict['Train']['Batch_Size'],
+            batch_size= hp_Dict['Inference_Batch_Size'] or hp_Dict['Train']['Batch_Size'],
             num_workers= hp_Dict['Train']['Num_Workers'],
             pin_memory= True
             )
@@ -114,10 +118,14 @@ class Trainer:
             betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
             eps= hp_Dict['Train']['ADAM']['Epsilon'],
             )
-        self.scheduler = torch.optim.lr_scheduler.StepLR(
+        # self.scheduler = torch.optim.lr_scheduler.StepLR(
+        #     optimizer= self.optimizer,
+        #     step_size= hp_Dict['Train']['Learning_Rate']['Decay_Step'],
+        #     gamma= hp_Dict['Train']['Learning_Rate']['Decay_Rate'],
+        #     )
+        self.scheduler = Noam_Scheduler(
             optimizer= self.optimizer,
-            step_size= hp_Dict['Train']['Learning_Rate']['Decay_Step'],
-            gamma= hp_Dict['Train']['Learning_Rate']['Decay_Rate'],
+            warmup_steps= hp_Dict['Train']['Learning_Rate']['Warmup_Step']
             )
 
         if hp_Dict['Use_Mixed_Precision']:
@@ -158,13 +166,17 @@ class Trainer:
         self.optimizer.zero_grad()
         if hp_Dict['Use_Mixed_Precision']:            
             with amp.scale_loss(loss_Dict['Loss'], self.optimizer) as scaled_loss:
-                scaled_loss.backward()
+                scaled_loss.backward()            
+            torch.nn.utils.clip_grad_norm_(
+                parameters= amp.master_params(self.optimizer),
+                max_norm= hp_Dict['Train']['Gradient_Norm']
+                )
         else:
             loss_Dict['Loss'].backward()        
-        torch.nn.utils.clip_grad_norm_(
-            parameters= self.model_Dict['GlowTTS'].parameters(),
-            max_norm= hp_Dict['Train']['Gradient_Norm']
-            )
+            torch.nn.utils.clip_grad_norm_(
+                parameters= self.model_Dict['GlowTTS'].parameters(),
+                max_norm= hp_Dict['Train']['Gradient_Norm']
+                )
         self.optimizer.step()
         self.scheduler.step()
         self.steps += 1
@@ -339,9 +351,9 @@ class Trainer:
         for step, (tokens, token_lengths, length_scales, texts) in tqdm(
             enumerate(self.dataLoader_Dict['Inference']),
             desc='[Inference]',
-            total= math.ceil(len(self.dataLoader_Dict['Inference'].dataset) / hp_Dict['Train']['Batch_Size'])
+            total= math.ceil(len(self.dataLoader_Dict['Inference'].dataset) / (hp_Dict['Inference_Batch_Size'] or hp_Dict['Train']['Batch_Size']))
             ):
-            self.Inference_Step(tokens, token_lengths, length_scales, texts, start_index= step * hp_Dict['Train']['Batch_Size'])
+            self.Inference_Step(tokens, token_lengths, length_scales, texts, start_index= step * (hp_Dict['Inference_Batch_Size'] or hp_Dict['Train']['Batch_Size']))
 
         for model in self.model_Dict.values():
             model.train()
@@ -446,9 +458,9 @@ class Trainer:
         self.tqdm.close()
         logging.info('Finished training.')
 
-    def Write_to_Tensorboard(self, category, loss_Dict):
-        for tag, loss in loss_Dict.items():
-            self.writer.add_scalar('{}/{}'.format(category, tag), loss, self.steps)
+    def Write_to_Tensorboard(self, category, scalar_Dict):
+        for tag, scalar in scalar_Dict.items():
+            self.writer_Dict[category].add_scalar(tag, scalar, self.steps)
 
 if __name__ == '__main__':
     argParser = argparse.ArgumentParser()

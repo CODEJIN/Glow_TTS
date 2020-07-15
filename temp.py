@@ -32,13 +32,21 @@
 
 # print(sorted(tokens))
 
+import pickle
+from scipy.io import wavfile
+import numpy as np
 
-import asyncio
+x = pickle.load(open("C:\Pattern\GlowTTS.SR16K.Pattern\Train\LJ\LJ.LJ001-0012.PICKLE", 'rb'))
 
-async def f(x):
-    x = await (x + 1)
-    return x
+wavfile.write(
+    filename= 'D:/t.wav',
+    data= (np.clip(x['Audio'], -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
+    rate= 16000
+    )
 
-futures = [f(x) for x in range(100)]
-asyncio.get_event_loop().run_until_complete(asyncio.wait(futures))
+import matplotlib.pyplot as plt
+plt.imshow(x['Mel'].T, aspect='auto', origin='lower')
+plt.colorbar()
+plt.show()
 
+np.save('D:/t.npy', x['Mel'], False)
