@@ -1,9 +1,10 @@
 # Glow TTS
 
-* This code is a replication of [official Glow TTS code](https://github.com/jaywalnut310/glow-tts). If you want to use Parallel WaveGAN model, I recommend that you refer to the official code.
+* This code is a replication of [official Glow TTS code](https://github.com/jaywalnut310/glow-tts). If you want to use Glow TTS model, I recommend that you refer to the official code.
 * The following is the paper I referred:
 
 [Kim, J., Kim, S., Kong, J., & Yoon, S. (2020). Glow-TTS: A Generative Flow for Text-to-Speech via Monotonic Alignment Search. arXiv preprint arXiv:2005.11129.](https://arxiv.org/abs/2005.11129)
+[Shaw, P., Uszkoreit, J., & Vaswani, A. (2018). Self-attention with relative position representations. arXiv preprint arXiv:1803.02155.](https://arxiv.org/abs/1803.02155)
 
 # Requirements
 
@@ -82,33 +83,11 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in 'H
 * Use_Mixed_Precision
     * Setting mixed precision.
     * To use, `Nvidia apex` must be installed in the environment.
+    * In several preprocessing hyper parameters, loss overflow problem occurs.
 
 * Device
     * Setting which GPU device is used in multi-GPU enviornment.
     * Or, if using only CPU, please set '-1'.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # Generate pattern
 
@@ -131,7 +110,6 @@ At least, one or more of datasets must be used.
     * Set the path of VCTK. VCTK's patterns are generated.
 * -libri <path>
     * Set the path of LibriTTS. LibriTTS's patterns are generated.
-
 * -text
     * Set whether the text information save or not.
     * This is for other model. To use in Glow TTS, this option must be set.
@@ -165,3 +143,5 @@ python Train.py -s <int>
 # Future works
 
 1. Applying multi-speaker
+    * One-hot based
+    * GE2E embedding based

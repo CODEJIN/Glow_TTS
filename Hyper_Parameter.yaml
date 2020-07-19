@@ -88,8 +88,6 @@ Train:
     Batch_Size: 32
     Learning_Rate:
         Initial: 1.0e-3
-        # Decay_Step: 10000
-        # Decay_Rate: 0.9
         Warmup_Step: 4000
     ADAM:
         Beta1: 0.9
@@ -101,11 +99,11 @@ Train:
     Logging_Interval: 100
     Evaluation_Interval: 1000
     Inference_Interval: 1000
-    Initial_Inference: true
+    Initial_Inference: false
 
-Inference_Batch_Size: 2 #null
-Inference_Path: 'D:/GlowTTS.Results/SR16K.Results/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR16K.Results/Log'
-Use_Mixed_Precision: true  # apex is required.
+Inference_Batch_Size: 1 #null
+Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Retry4/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results.Retry4/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR16K.Results.Retry4/Log'
+Use_Mixed_Precision: false  # apex is required.
 Device: '1'

@@ -203,7 +203,9 @@ def VCTK_Info_Load(path, use_text= False):
         for path in paths:
             if 'p315'.upper() in path.upper():  #Officially, 'p315' text is lost in VCTK dataset.
                 continue
-            text_Dict[path] = Text_Filtering(open(path.replace('wav48', 'txt').replace('wav', 'txt'), 'r').readlines()[0])
+            text = Text_Filtering(open(path.replace('wav48', 'txt').replace('wav', 'txt'), 'r').readlines()[0])
+            if not text is None:
+                text_Dict[path] = text
         paths = list(text_Dict.keys())
 
     speaker_Dict = {
@@ -304,7 +306,7 @@ def Metadata_Generate(eval= False, use_text= False):
 def Token_Dict_Generate(text_Dict):
     tokens = set()
     for text in text_Dict.values():
-        tokens = tokens.union(set(text))    
+        tokens = tokens.union(set(text))
 
     os.makedirs(os.path.dirname(hp_Dict['Token_Path']), exist_ok= True)
     #I don't use yaml.dump in this case to sort clearly.
@@ -379,7 +381,8 @@ if __name__ == '__main__':
     if len(paths) == 0:
         raise ValueError('Total info count must be bigger than 0.')
 
-    Token_Dict_Generate(text_Dict)
+    if args.use_text:
+        Token_Dict_Generate(text_Dict)
 
     speaker_Index_Dict = Speaker_Index_Dict_Generate(speaker_Dict)
 
@@ -431,5 +434,5 @@ if __name__ == '__main__':
 
 
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -bc2013 "D:\Pattern\ENG\BC2013" -cmua "D:\Pattern\ENG\CMUA" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
-# python Pattern_Generator.py -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
+# python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS" -text
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -text
