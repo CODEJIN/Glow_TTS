@@ -17,23 +17,23 @@ class GlowTTS(torch.nn.Module):
         self.layer_Dict['Decoder'] = Decoder()
         self.layer_Dict['Maximum_Path_Generater'] = Maximum_Path_Generater()
 
-    def forward(self, tokens, token_lengths, mels= None, mel_lengths= None, noise_scale= 1.0, length_scale= 1.0, is_training= False):
+    def forward(self, tokens, token_lengths, mels= None, mel_lengths= None, speaker_embedding= None, noise_scale= 1.0, length_scale= 1.0, is_training= False):
         if is_training:
-            return self.forward_train(tokens, token_lengths, mels, mel_lengths)
+            return self.forward_train(tokens, token_lengths, mels, mel_lengths, speaker_embedding)
         else:
-            return self.forward_inference(tokens, token_lengths, noise_scale, length_scale)
+            return self.forward_inference(tokens, token_lengths, speaker_embedding, noise_scale, length_scale)
 
-    def forward_train(self, tokens, token_lengths, mels, mel_lengths):
+    def forward_train(self, tokens, token_lengths, mels, mel_lengths, speaker_embedding= None):
         assert all(mel_lengths % hp_Dict['Decoder']['Num_Squeeze'] == 0), 'Mel lengths must be diviable by Num_Squeeze.'
         token_Masks = self.Mask_Generate(token_lengths)
-        mean, log_Std, log_Durations, token_Masks = self.layer_Dict['Encoder'](tokens, token_Masks)
+        mean, log_Std, log_Durations, token_Masks = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embedding)
 
         mel_Masks = self.Mask_Generate(mel_lengths)
 
         attention_Masks = torch.unsqueeze(token_Masks, -1) * torch.unsqueeze(mel_Masks, 2)
         attention_Masks = attention_Masks.squeeze(1)
 
-        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks)
+        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks, speaker_embedding)
         
         with torch.no_grad():
             std_Square_R = torch.exp(-2 * log_Std)
@@ -52,9 +52,9 @@ class GlowTTS(torch.nn.Module):
 
         return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets
 
-    def forward_inference(self, tokens, token_lengths, noise_scale= 1.0, length_scale= 1.0):
+    def forward_inference(self, tokens, token_lengths, speaker_embedding= None, noise_scale= 1.0, length_scale= 1.0):
         token_Masks = self.Mask_Generate(token_lengths)
-        mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks)
+        mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embedding)
         
         if isinstance(length_scale, torch.Tensor):
             length_scale = length_scale.unsqueeze(-1).unsqueeze(-1)
@@ -74,7 +74,7 @@ class GlowTTS(torch.nn.Module):
         
         z = (mel_Mean + torch.exp(mel_Log_Std) * noises) * mel_Masks
         
-        mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, reverse= True)
+        mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, speaker_embedding, reverse= True)
 
         return mels, attentions
 
@@ -129,7 +129,7 @@ class Encoder(torch.nn.Module):
             )
         self.layer_Dict['Duration_Predictor'] = Duration_Predictor()
 
-    def forward(self, x, mask):
+    def forward(self, x, mask, speaker_embedding= None):
         '''
         x: [Batch, Time]
         lengths: [Batch]
@@ -143,7 +143,7 @@ class Encoder(torch.nn.Module):
             [hp_Dict['Sound']['Mel_Dim'], hp_Dict['Sound']['Mel_Dim']],
             dim= 1
             )
-        log_Durations = self.layer_Dict['Duration_Predictor'](x.detach(), mask)
+        log_Durations = self.layer_Dict['Duration_Predictor'](x.detach(), mask, speaker_embedding)
 
         return mean, log_Std, log_Durations, mask
 
@@ -159,14 +159,14 @@ class Decoder(torch.nn.Module):
         for index in range(hp_Dict['Decoder']['Stack']):
             self.layer_Dict['Flows'].append(AIA())
 
-    def forward(self, x, mask, reverse= False):
+    def forward(self, x, mask, speaker_embedding= None, reverse= False):
         x, mask = self.layer_Dict['Squeeze'](x, mask)
 
         log_Dets = []
         for flow in  reversed(self.layer_Dict['Flows']) if reverse else self.layer_Dict['Flows']:
-            x, logdet = flow(x, mask, reverse= reverse)
+            x, logdet = flow(x, mask, speaker_embedding, reverse= reverse)
             log_Dets.extend(logdet)
-        
+
         x, mask = self.layer_Dict['Unsqueeze'](x, mask)
 
         return x, (None if reverse else torch.sum(torch.stack(log_Dets), dim= 0))
@@ -328,6 +328,8 @@ class Duration_Predictor(torch.nn.Module):
         self.layer_Dict = torch.nn.ModuleDict()
 
         previous_channels = hp_Dict['Encoder']['Channels']
+        if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+            previous_channels += hp_Dict['Speaker_Embedding']['Embedding_Size']
         for index in range(hp_Dict['Encoder']['Duration_Predictor']['Stacks']):
             self.layer_Dict['CRND_{}'.format(index)] = CRND(in_channels= previous_channels)
             previous_channels = hp_Dict['Encoder']['Duration_Predictor']['Channels']
@@ -338,7 +340,12 @@ class Duration_Predictor(torch.nn.Module):
             kernel_size= 1
             )
 
-    def forward(self, x, x_mask):
+    def forward(self, x, x_mask, speaker_embedding= None):
+        if not speaker_embedding is None:
+            x = torch.cat(
+                [x, speaker_embedding.unsqueeze(2).expand(-1, -1, x.size(2))],
+                dim= 1
+                )
         for index in range(hp_Dict['Encoder']['Duration_Predictor']['Stacks']):
             x = self.layer_Dict['CRND_{}'.format(index)](x, x_mask)
         x = self.layer_Dict['Projection'](x * x_mask)
@@ -386,10 +393,10 @@ class AIA(torch.nn.Module):
         self.layers.append(Invertible_1x1_Conv())
         self.layers.append(Affine_Coupling_Layer())
 
-    def forward(self, x, mask, reverse= False):
+    def forward(self, x, mask, speaker_embedding, reverse= False):
         logdets = []
         for layer in (reversed(self.layers) if reverse else self.layers):
-            x, logdet = layer(x, mask, reverse= reverse)
+            x, logdet = layer(x, mask, speaker_embedding= speaker_embedding, reverse= reverse)
             logdets.append(logdet)
         
         return x, logdets
@@ -406,7 +413,7 @@ class Activation_Norm(torch.nn.Module):
             torch.zeros(1, hp_Dict['Sound']['Mel_Dim'] * hp_Dict['Decoder']['Num_Squeeze'], 1)
             )
 
-    def forward(self, x, mask, reverse= False):
+    def forward(self, x, mask, reverse= False, **kwargs):   # kwargs is to skip speaker embedding
         if mask is None:
             mask = torch.ones(x.size(0), 1, x.size(2)).to(device=x.device, dtype= x.dtype)
         if not self.initialized:
@@ -451,7 +458,7 @@ class Invertible_1x1_Conv(torch.nn.Module):
 
         self.weight = torch.nn.Parameter(weight)
 
-    def forward(self, x, mask= None, reverse= False):
+    def forward(self, x, mask= None, reverse= False, **kwargs):   # kwargs is to skip speaker embedding
         batch, channels, time = x.size()
         assert channels % hp_Dict['Decoder']['Num_Split'] == 0
 
@@ -504,7 +511,7 @@ class Affine_Coupling_Layer(torch.nn.Module):
         self.layer_Dict['End'].weight.data.zero_()
         self.layer_Dict['End'].bias.data.zero_()
 
-    def forward(self, x, mask, reverse= False):
+    def forward(self, x, mask, speaker_embedding= None, reverse= False):
         batch, channels, time = x.size()
         if mask is None:
             mask = 1
@@ -516,7 +523,7 @@ class Affine_Coupling_Layer(torch.nn.Module):
             )
         
         x = self.layer_Dict['Start'](x_a) * mask
-        x = self.layer_Dict['WaveNet'](x, mask)
+        x = self.layer_Dict['WaveNet'](x, mask, speaker_embedding)
         outs = self.layer_Dict['End'](x)
 
         mean, logs = torch.split(
@@ -553,17 +560,24 @@ class WaveNet(torch.nn.Module):
                 out_channels= hp_Dict['Decoder']['Affine_Coupling']['Calc_Channels'] * (2 if index < hp_Dict['Decoder']['Affine_Coupling']['WaveNet']['Num_Layers'] - 1 else 1),
                 kernel_size= 1
                 ))
+            if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+                self.layer_Dict['Speaker_Embedding_{}'.format(index)] = torch.nn.utils.weight_norm(torch.nn.Conv1d(
+                    in_channels= hp_Dict['Speaker_Embedding']['Embedding_Size'],
+                    out_channels= hp_Dict['Decoder']['Affine_Coupling']['Calc_Channels'] * 2,
+                    kernel_size= 1
+                    ))
 
         self.layer_Dict['Dropout'] = torch.nn.Dropout(
             p= hp_Dict['Decoder']['Affine_Coupling']['WaveNet']['Dropout_Rate']
             )
 
-    def forward(self, x, mask):
+    def forward(self, x, mask, speaker_embedding= None):
         output = torch.zeros_like(x)
-
         for index in range(hp_Dict['Decoder']['Affine_Coupling']['WaveNet']['Num_Layers']):
-            ins = self.layer_Dict['In_{}'.format(index)](x)
+            ins = self.layer_Dict['In_{}'.format(index)](x)     # [Batch, Channels, Time]
             ins = self.layer_Dict['Dropout'](ins)
+            if not speaker_embedding is None:
+                ins += self.layer_Dict['Speaker_Embedding_{}'.format(index)](speaker_embedding.unsqueeze(2))     # [Batch, Channels, Time] + [Batch, Channels, 1] -> [Batch, Channels, Time]
             acts = self.fused_gate(ins)
             res_Skips = self.layer_Dict['Res_Skip_{}'.format(index)](acts)
             if index < hp_Dict['Decoder']['Affine_Coupling']['WaveNet']['Num_Layers'] - 1:

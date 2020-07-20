@@ -3,7 +3,7 @@ import numpy as np
 import yaml, pickle, os, math, logging
 from random import shuffle
 
-from Pattern_Generator import Text_Filtering
+from Pattern_Generator import Pattern_Generate, Text_Filtering
 
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
@@ -16,6 +16,33 @@ def Text_to_Token(text):
         token_Dict[letter]
         for letter in ['<S>'] + list(text) + ['<E>']
         ], dtype= np.int32)
+
+def Speaker_Embedding_Stack(mels):
+    mels_for_embeddig = []
+    for mel in mels:
+        overlap_Length = hp_Dict['Speaker_Embedding']['Inference']['Overlap_Length']
+        slice_Length = hp_Dict['Speaker_Embedding']['Inference']['Slice_Length']
+        required_Length = hp_Dict['Speaker_Embedding']['Inference']['Samples'] * (slice_Length - overlap_Length) + overlap_Length
+
+        if mel.shape[0] > required_Length:
+            offset = np.random.randint(0, mel.shape[0] - required_Length)
+            mel = mel[offset:offset + required_Length]
+        else:
+            pad = (required_Length - mel.shape[0]) / 2
+            mel = np.pad(
+                mel,
+                [[int(np.floor(pad)), int(np.ceil(pad))], [0, 0]],
+                mode= 'reflect'
+                )
+
+        mel = np.stack([
+            mel[index:index + slice_Length]
+            for index in range(0, required_Length - overlap_Length, slice_Length - overlap_Length)
+            ])
+        mels_for_embeddig.append(mel)
+
+    return np.vstack(mels_for_embeddig)
+
 
 class Train_Dataset(torch.utils.data.Dataset):
     def __init__(self):
@@ -98,12 +125,23 @@ class Inference_Dataset(torch.utils.data.Dataset):
         super(Inference_Dataset, self).__init__()
 
         self.pattern_List = []
-        for index, line in enumerate(open(pattern_path, 'r').readlines()[1:]):            
-            text, length_Scale = Text_Filtering(line.strip().split('\t')[0]), float(line.strip().split('\t')[1])
-            if text is None or text == '':                
+        for index, line in enumerate(open(pattern_path, 'r').readlines()[1:]):
+            line = line.strip().split('\t')
+            label, text, length_Scale = line[0], Text_Filtering(line[1]), float(line[2])
+            
+            if text is None or text == '':
                 logging.warn('The text of line {} in \'{}\' is incorrect. This line is ignoired.'.format(index + 1, pattern_path))
                 continue
-            self.pattern_List.append((text, length_Scale))
+
+            if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+                path = line[3]
+                if not os.path.exists(path):
+                    logging.warn('There is no wav file of line {} in \'{}\'. This line is ignoired.'.format(index + 1, pattern_path))
+                    continue
+            else:
+                path = None
+
+            self.pattern_List.append((label, text, length_Scale, path))
 
         self.cache_Dict = {}
 
@@ -111,9 +149,15 @@ class Inference_Dataset(torch.utils.data.Dataset):
         if idx in self.cache_Dict.keys():
             return self.cache_Dict[idx]
 
-        text, length_Scale = self.pattern_List[idx]
+        label, text, length_Scale, path = self.pattern_List[idx]
+        tokens = Text_to_Token(text)
 
-        pattern = Text_to_Token(text), length_Scale, text
+        if not path is None:
+            _, mel_for_Embedding, _ = Pattern_Generate(path, top_db= 30)
+        else:
+            mel_for_Embedding = None
+        
+        pattern = tokens, length_Scale, mel_for_Embedding, label, text
 
         if hp_Dict['Train']['Use_Pattern_Cache']:
             self.cache_Dict[idx] = pattern
@@ -130,6 +174,8 @@ class Collater:
             (token, mel)
             for token, mel  in batch
             ])
+        mels_for_Embedding = mels
+        
         mels = [
             mel[:(mel.shape[0] // hp_Dict['Decoder']['Num_Squeeze'] * hp_Dict['Decoder']['Num_Squeeze'])]
             for mel in mels
@@ -143,8 +189,15 @@ class Collater:
         token_Lengths = torch.LongTensor(token_Lengths)   # [Batch]
         mels = torch.FloatTensor(mels).transpose(2, 1)   # [Batch, Mel_dim, Time]
         mel_Lengths = torch.LongTensor(mel_Lengths)   # [Batch]
+
+        if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+            mels_for_Embedding = Speaker_Embedding_Stack(mels_for_Embedding)
+            mels_for_Embedding = torch.FloatTensor(mels_for_Embedding).transpose(2, 1)   # [Batch, Mel_dim, Time]
+        else:
+            mels_for_Embedding = None
+
         
-        return tokens, token_Lengths, mels, mel_Lengths
+        return tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding
     
     def Stack(self, tokens, mels):
         max_Token_Length = max([token.shape[0] for token in tokens])
@@ -163,9 +216,9 @@ class Collater:
 
 class Inference_Collater:
     def __call__(self, batch):
-        tokens, length_Scales, texts = zip(*[
-            (token, length_Scale, text)
-            for token, length_Scale, text  in batch
+        tokens, length_Scales, mels_for_Embedding, labels, texts = zip(*[
+            (token, length_Scale, mel_for_Embedding, label, text)
+            for token, length_Scale, mel_for_Embedding, label, text  in batch
             ])
         token_Lengths = [token.shape[0] for token in tokens]
 
@@ -175,13 +228,42 @@ class Inference_Collater:
         token_Lengths = torch.LongTensor(token_Lengths)   # [Batch]
         length_Scales = torch.FloatTensor(length_Scales)
 
-        return tokens, token_Lengths, length_Scales, texts
+        if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+            mels_for_Embedding = Speaker_Embedding_Stack(mels_for_Embedding)
+            mels_for_Embedding = torch.FloatTensor(mels_for_Embedding).transpose(2, 1)   # [Batch, Mel_dim, Time]
+        else:
+            mels_for_Embedding = None
+
+        return tokens, token_Lengths, length_Scales, mels_for_Embedding, labels, texts
 
     def Stack(self, tokens):
-        max_Token_Length = max([token.shape[0] for token in tokens])        
+        max_Token_Length = max([token.shape[0] for token in tokens])
         tokens = np.stack(
             [np.pad(token, [0, max_Token_Length - token.shape[0]], constant_values= token_Dict['<E>']) for token in tokens],
             axis= 0
             )
 
         return tokens
+
+if __name__ == '__main__':
+    dataset = Dev_Dataset()
+    collater = Collater()
+    
+    dataLoader = torch.utils.data.DataLoader(
+        dataset= dataset,
+        shuffle= False,
+        collate_fn= collater,
+        batch_size= hp_Dict['Train']['Batch_Size'],
+        num_workers= hp_Dict['Train']['Num_Workers'],
+        pin_memory= True
+        )
+
+    import time
+    for x in dataLoader:
+        tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding = x
+        print(tokens.shape)
+        print(token_Lengths.shape)
+        print(mels.shape)
+        print(mel_Lengths.shape)
+        print(mels_for_Embedding.shape)
+        time.sleep(2.0)

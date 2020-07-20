@@ -1,3 +1,6 @@
 [submodule "PWGAN"]
 	path = PWGAN
 	url = https://github.com/CODEJIN/PWGAN_Torch
+[submodule "Speaker_Embedding"]
+	path = Speaker_Embedding
+	url = https://github.com/CODEJIN/Speaker_Embedding_Torch

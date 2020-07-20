@@ -59,14 +59,26 @@ WaveNet:
     Upsample:
         Scales: [4, 4, 4, 4]
         Pad: 2
-    Checkpoint_Path: null
-    # Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_322000.pkl'
+    # Checkpoint_Path: null
+    Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
 
-Token_Path: 'C:/Pattern/GlowTTS.SR16K.Pattern/Token.yaml'
+Speaker_Embedding:
+    Embedding_Size: 256
+    LSTM:
+        Sizes: 256
+        Stacks: 3
+    Inference:
+        Samples: 5
+        Slice_Length: 64
+        Overlap_Length: 32
+    Checkpoint_Path: null
+    Checkpoint_Path: './Speaker_Embedding/Example_Results/Checkpoint/S_100000.pkl'
+
+Token_Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Token.yaml'
 Train:
     Use_Pattern_Cache: true
     Train_Pattern:
-        Path: 'C:/Pattern/GlowTTS.SR16K.Pattern/Train'
+        Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Train'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
@@ -76,7 +88,7 @@ Train:
             Max: 150
         Accumulated_Dataset_Epoch: 1   # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
-        Path: 'C:/Pattern/GlowTTS.SR16K.Pattern/Eval'
+        Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
@@ -94,16 +106,16 @@ Train:
         Beta2: 0.999
         Epsilon: 1.0e-7
     Gradient_Norm: 5.0
-    Max_Step: 100000
+    Max_Step: 200000
     Checkpoint_Save_Interval: 1000
     Logging_Interval: 100
     Evaluation_Interval: 1000
     Inference_Interval: 1000
-    Initial_Inference: false
+    Initial_Inference: true
 
-Inference_Batch_Size: 1 #null
-Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Retry4/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results.Retry4/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR16K.Results.Retry4/Log'
+Inference_Batch_Size: 4 #null
+Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Log'
 Use_Mixed_Precision: false  # apex is required.
-Device: '1'
+Device: '0'
