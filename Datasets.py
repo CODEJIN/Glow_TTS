@@ -20,9 +20,9 @@ def Text_to_Token(text):
 def Speaker_Embedding_Stack(mels):
     mels_for_embeddig = []
     for mel in mels:
-        overlap_Length = hp_Dict['Speaker_Embedding']['Inference']['Overlap_Length']
-        slice_Length = hp_Dict['Speaker_Embedding']['Inference']['Slice_Length']
-        required_Length = hp_Dict['Speaker_Embedding']['Inference']['Samples'] * (slice_Length - overlap_Length) + overlap_Length
+        overlap_Length = hp_Dict['Speaker_Embedding']['GE2E']['Inference']['Overlap_Length']
+        slice_Length = hp_Dict['Speaker_Embedding']['GE2E']['Inference']['Slice_Length']
+        required_Length = hp_Dict['Speaker_Embedding']['GE2E']['Inference']['Samples'] * (slice_Length - overlap_Length) + overlap_Length
 
         if mel.shape[0] > required_Length:
             offset = np.random.randint(0, mel.shape[0] - required_Length)
@@ -60,7 +60,6 @@ class Train_Dataset(torch.utils.data.Dataset):
                 metadata_Dict['Text_Length_Dict'][x] <= hp_Dict['Train']['Train_Pattern']['Text_Length']['Max']
                 ])            
             ] * hp_Dict['Train']['Train_Pattern']['Accumulated_Dataset_Epoch']        
-        self.dataset_Dict = metadata_Dict['Dataset_Dict']
             
         self.cache_Dict = {}
 
@@ -69,10 +68,9 @@ class Train_Dataset(torch.utils.data.Dataset):
             return self.cache_Dict[idx]
 
         file = self.file_List[idx]
-        dataset = self.dataset_Dict[file]
         path = os.path.join(hp_Dict['Train']['Train_Pattern']['Path'], file).replace('\\', '/')
         pattern_Dict = pickle.load(open(path, 'rb'))
-        pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel']
+        pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel'], pattern_Dict['Speaker_ID']
 
         if hp_Dict['Train']['Use_Pattern_Cache']:
             self.cache_Dict[path] = pattern
@@ -98,7 +96,6 @@ class Dev_Dataset(torch.utils.data.Dataset):
                 metadata_Dict['Text_Length_Dict'][x] <= hp_Dict['Train']['Eval_Pattern']['Text_Length']['Max']
                 ])            
             ]
-        self.dataset_Dict = metadata_Dict['Dataset_Dict']
             
         self.cache_Dict = {}
 
@@ -107,10 +104,9 @@ class Dev_Dataset(torch.utils.data.Dataset):
             return self.cache_Dict[idx]
 
         file = self.file_List[idx]
-        dataset = self.dataset_Dict[file]
         path = os.path.join(hp_Dict['Train']['Eval_Pattern']['Path'], file).replace('\\', '/')
         pattern_Dict = pickle.load(open(path, 'rb'))
-        pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel']
+        pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel'], pattern_Dict['Speaker_ID']
 
         if hp_Dict['Train']['Use_Pattern_Cache']:
             self.cache_Dict[path] = pattern
@@ -128,20 +124,24 @@ class Inference_Dataset(torch.utils.data.Dataset):
         for index, line in enumerate(open(pattern_path, 'r').readlines()[1:]):
             line = line.strip().split('\t')
             label, text, length_Scale = line[0], Text_Filtering(line[1]), float(line[2])
-            
+
             if text is None or text == '':
                 logging.warn('The text of line {} in \'{}\' is incorrect. This line is ignoired.'.format(index + 1, pattern_path))
                 continue
 
-            if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+            path, speaker = None, None
+            if hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
                 path = line[3]
                 if not os.path.exists(path):
                     logging.warn('There is no wav file of line {} in \'{}\'. This line is ignoired.'.format(index + 1, pattern_path))
                     continue
-            else:
-                path = None
+            elif hp_Dict['Speaker_Embedding']['Type'] == 'LUT':
+                speaker = int(line[3])
+                if speaker >= hp_Dict['Speaker_Embedding']['Num_Speakers']:
+                    logging.warn('The speaker ID index ({}) of line {} is over the limit ({}). This line is ignoired.'.format(speaker, index + 1, hp_Dict['Speaker_Embedding']['Num_Speakers']))
+                    continue
 
-            self.pattern_List.append((label, text, length_Scale, path))
+            self.pattern_List.append((label, text, length_Scale, path, speaker))
 
         self.cache_Dict = {}
 
@@ -149,15 +149,15 @@ class Inference_Dataset(torch.utils.data.Dataset):
         if idx in self.cache_Dict.keys():
             return self.cache_Dict[idx]
 
-        label, text, length_Scale, path = self.pattern_List[idx]
-        tokens = Text_to_Token(text)
+        label, text, length_Scale, path, speaker = self.pattern_List[idx]
+        token = Text_to_Token(text)
 
         if not path is None:
             _, mel_for_Embedding, _ = Pattern_Generate(path, top_db= 30)
         else:
             mel_for_Embedding = None
         
-        pattern = tokens, length_Scale, mel_for_Embedding, label, text
+        pattern = token, length_Scale, mel_for_Embedding, label, text, speaker
 
         if hp_Dict['Train']['Use_Pattern_Cache']:
             self.cache_Dict[idx] = pattern
@@ -170,9 +170,9 @@ class Inference_Dataset(torch.utils.data.Dataset):
 
 class Collater:
     def __call__(self, batch):
-        tokens, mels = zip(*[
-            (token, mel)
-            for token, mel  in batch
+        tokens, mels, speakers = zip(*[
+            (token, mel, speaker)
+            for token, mel, speaker  in batch
             ])
         mels_for_Embedding = mels
         
@@ -189,15 +189,16 @@ class Collater:
         token_Lengths = torch.LongTensor(token_Lengths)   # [Batch]
         mels = torch.FloatTensor(mels).transpose(2, 1)   # [Batch, Mel_dim, Time]
         mel_Lengths = torch.LongTensor(mel_Lengths)   # [Batch]
+        speakers = torch.LongTensor(speakers)
 
-        if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+        if hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
             mels_for_Embedding = Speaker_Embedding_Stack(mels_for_Embedding)
             mels_for_Embedding = torch.FloatTensor(mels_for_Embedding).transpose(2, 1)   # [Batch, Mel_dim, Time]
         else:
             mels_for_Embedding = None
 
         
-        return tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding
+        return tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding, speakers
     
     def Stack(self, tokens, mels):
         max_Token_Length = max([token.shape[0] for token in tokens])
@@ -216,9 +217,9 @@ class Collater:
 
 class Inference_Collater:
     def __call__(self, batch):
-        tokens, length_Scales, mels_for_Embedding, labels, texts = zip(*[
-            (token, length_Scale, mel_for_Embedding, label, text)
-            for token, length_Scale, mel_for_Embedding, label, text  in batch
+        tokens, length_Scales, mels_for_Embedding, labels, texts, speakers = zip(*[
+            (token, length_Scale, mel_for_Embedding, label, text, speaker)
+            for token, length_Scale, mel_for_Embedding, label, text, speaker  in batch
             ])
         token_Lengths = [token.shape[0] for token in tokens]
 
@@ -228,13 +229,15 @@ class Inference_Collater:
         token_Lengths = torch.LongTensor(token_Lengths)   # [Batch]
         length_Scales = torch.FloatTensor(length_Scales)
 
-        if not hp_Dict['Speaker_Embedding']['Checkpoint_Path'] is None:
+        mels_for_Embedding = None        
+        if hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
             mels_for_Embedding = Speaker_Embedding_Stack(mels_for_Embedding)
             mels_for_Embedding = torch.FloatTensor(mels_for_Embedding).transpose(2, 1)   # [Batch, Mel_dim, Time]
-        else:
-            mels_for_Embedding = None
+        elif hp_Dict['Speaker_Embedding']['Type'] == 'LUT':
+            speakers = torch.LongTensor(speakers)
+            
 
-        return tokens, token_Lengths, length_Scales, mels_for_Embedding, labels, texts
+        return tokens, token_Lengths, length_Scales, mels_for_Embedding, speakers, labels, texts
 
     def Stack(self, tokens):
         max_Token_Length = max([token.shape[0] for token in tokens])
