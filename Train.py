@@ -385,6 +385,7 @@ class Trainer:
                 pad= (hp_Dict['WaveNet']['Upsample']['Pad'], hp_Dict['WaveNet']['Upsample']['Pad']),
                 mode= 'replicate'
                 )
+            mels.clamp_(min= -hp_Dict['Sound']['Max_Abs_Mel'], max= hp_Dict['Sound']['Max_Abs_Mel'])            
 
             for index, (audio, file) in enumerate(zip(
                 self.model_Dict['PWGAN'](noises, mels).cpu().numpy(),
