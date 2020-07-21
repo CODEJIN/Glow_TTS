@@ -189,7 +189,7 @@ class Trainer:
             token_lengths= token_lengths,
             mels= mels,
             mel_lengths= mel_lengths,
-            speaker_embedding= embeddings,
+            speaker_embeddings= embeddings,
             is_training= True
             )
 
@@ -276,7 +276,7 @@ class Trainer:
             token_lengths= token_lengths,
             mels= mels,
             mel_lengths= mel_lengths,
-            speaker_embedding= embeddings,
+            speaker_embeddings= embeddings,
             is_training= True
             )
 
@@ -337,7 +337,7 @@ class Trainer:
             tokens= tokens,
             token_lengths= token_lengths,
             length_scale= length_scales,
-            speaker_embedding= embeddings,
+            speaker_embeddings= embeddings,
             is_training= False
             )
 

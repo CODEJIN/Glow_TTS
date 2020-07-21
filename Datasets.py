@@ -229,13 +229,15 @@ class Inference_Collater:
         token_Lengths = torch.LongTensor(token_Lengths)   # [Batch]
         length_Scales = torch.FloatTensor(length_Scales)
 
-        mels_for_Embedding = None        
+        
         if hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
             mels_for_Embedding = Speaker_Embedding_Stack(mels_for_Embedding)
             mels_for_Embedding = torch.FloatTensor(mels_for_Embedding).transpose(2, 1)   # [Batch, Mel_dim, Time]
         elif hp_Dict['Speaker_Embedding']['Type'] == 'LUT':
             speakers = torch.LongTensor(speakers)
-            
+        else:
+            mels_for_Embedding = None
+            speakers= None
 
         return tokens, token_Lengths, length_Scales, mels_for_Embedding, speakers, labels, texts
 

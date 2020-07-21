@@ -74,7 +74,6 @@ Speaker_Embedding:
             Samples: 5
             Slice_Length: 64
             Overlap_Length: 32
-        Checkpoint_Path: null
         Checkpoint_Path: './Speaker_Embedding/Example_Results/Checkpoint/S_100000.pkl'
 
 Token_Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Token.yaml'
