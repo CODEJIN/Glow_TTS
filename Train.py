@@ -12,7 +12,8 @@ from random import sample
 
 from Modules import GlowTTS, MLE_Loss
 from Datasets import Train_Dataset, Dev_Dataset, Inference_Dataset, Collater, Inference_Collater
-from Noam_Scheduler import Noam_Scheduler
+# from Noam_Scheduler import Noam_Scheduler
+from Radam import RAdam
 
 from PWGAN.Modules import Generator as PWGAN
 from Speaker_Embedding.Modules import Encoder as Speaker_Embedding, Normalize
@@ -122,16 +123,27 @@ class Trainer:
             'MSE': torch.nn.MSELoss().to(device),
             'MLE': MLE_Loss().to(device)
             }
-        self.optimizer = torch.optim.Adam(
+        # self.optimizer = torch.optim.Adam(
+        #     params= self.model_Dict['GlowTTS'].parameters(),
+        #     lr= hp_Dict['Train']['Learning_Rate']['Initial'],
+        #     betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
+        #     eps= hp_Dict['Train']['ADAM']['Epsilon'],
+        #     )
+        # self.scheduler = Noam_Scheduler(
+        #     optimizer= self.optimizer,
+        #     warmup_steps= hp_Dict['Train']['Learning_Rate']['Warmup_Step']
+        #     )
+        self.optimizer = RAdam(
             params= self.model_Dict['GlowTTS'].parameters(),
             lr= hp_Dict['Train']['Learning_Rate']['Initial'],
             betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
             eps= hp_Dict['Train']['ADAM']['Epsilon'],
             )
-        self.scheduler = Noam_Scheduler(
-            optimizer= self.optimizer,
-            warmup_steps= hp_Dict['Train']['Learning_Rate']['Warmup_Step']
-            )
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer= self.optimizer,
+                step_size= hp_Dict['Train']['Learning_Rate']['Decay_Step'],
+                gamma= hp_Dict['Train']['Learning_Rate']['Decay_Rate'],
+                )
 
         if hp_Dict['Use_Mixed_Precision']:
             models = [self.model_Dict['GlowTTS']]

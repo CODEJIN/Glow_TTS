@@ -136,7 +136,7 @@ class Encoder(torch.nn.Module):
         '''
         x = self.layer_Dict['Embedding'](x).transpose(2, 1) * math.sqrt(hp_Dict['Encoder']['Channels']) # [Batch, Dim, Time]
         x = self.layer_Dict['Prenet'](x, mask)
-        x = self.layer_Dict['Transformer'](x, mask)        
+        x = self.layer_Dict['Transformer'](x, mask)
 
         mean, log_Std = torch.split(
             self.layer_Dict['Project'](x) * mask,

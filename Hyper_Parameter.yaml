@@ -59,8 +59,8 @@ WaveNet:
     Upsample:
         Scales: [4, 4, 4, 4]
         Pad: 2
-    # Checkpoint_Path: null
-    Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
+    Checkpoint_Path: null
+    # Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
 
 Speaker_Embedding:
     Embedding_Size: 256
@@ -82,7 +82,7 @@ Train:
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
-            Max: 800
+            Max: 700
         Text_Length:
             Min: 10
             Max: 150
@@ -92,19 +92,20 @@ Train:
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
-            Max: 800
+            Max: 700
         Text_Length:
             Min: 10
             Max: 150
-    Num_Workers: 2
-    Batch_Size: 32
+    Num_Workers: 4
+    Batch_Size: 48
     Learning_Rate:
-        Initial: 1.0e-3
-        Warmup_Step: 4000
+        Initial: 1.0e-4
+        Decay_Step: 1000
+        Decay_Rate: 0.995
     ADAM:
         Beta1: 0.9
         Beta2: 0.999
-        Epsilon: 1.0e-7
+        Epsilon: 1.0e-6
     Gradient_Norm: 5.0
     Max_Step: 200000
     Checkpoint_Save_Interval: 1000
@@ -113,9 +114,9 @@ Train:
     Inference_Interval: 1000
     Initial_Inference: true
 
-Inference_Batch_Size: 4 #null
+Inference_Batch_Size: 8 #null
 Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Inference'
 Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Checkpoint'
 Log_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Log'
-Use_Mixed_Precision: false  # apex is required.
+Use_Mixed_Precision: true  # apex is required.
 Device: '0'
