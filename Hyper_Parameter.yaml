@@ -112,7 +112,7 @@ Train:
     Logging_Interval: 100
     Evaluation_Interval: 1000
     Inference_Interval: 1000
-    Initial_Inference: true
+    Initial_Inference: false
 
 Inference_Batch_Size: 8 #null
 Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Inference'
