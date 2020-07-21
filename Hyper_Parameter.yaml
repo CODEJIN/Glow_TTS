@@ -63,16 +63,19 @@ WaveNet:
     # Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
 
 Speaker_Embedding:
+    Type: 'GE2E'    #null, LUT, GE2E
+    Num_Speakers: 2457  # Only lut uses.
     Embedding_Size: 256
-    LSTM:
-        Sizes: 256
-        Stacks: 3
-    Inference:
-        Samples: 5
-        Slice_Length: 64
-        Overlap_Length: 32
-    Checkpoint_Path: null
-    Checkpoint_Path: './Speaker_Embedding/Example_Results/Checkpoint/S_100000.pkl'
+    GE2E:
+        LSTM:
+            Sizes: 256
+            Stacks: 3
+        Inference:
+            Samples: 5
+            Slice_Length: 64
+            Overlap_Length: 32
+        Checkpoint_Path: null
+        Checkpoint_Path: './Speaker_Embedding/Example_Results/Checkpoint/S_100000.pkl'
 
 Token_Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Token.yaml'
 Train:
