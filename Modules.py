@@ -63,10 +63,8 @@ class GlowTTS(torch.nn.Module):
 
     def forward_inference(self, tokens, token_lengths, speaker_embeddings= None, noise_scale= 1.0, length_scale= 1.0):
         token_Masks = self.Mask_Generate(token_lengths)
-        mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embeddings)
-        
-        if isinstance(length_scale, torch.Tensor):
-            length_scale = length_scale.unsqueeze(-1).unsqueeze(-1)
+        mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embeddings)        
+        length_scale = length_scale.unsqueeze(-1).unsqueeze(-1)
 
         durations = torch.ceil(torch.exp(log_Durations) * mask * length_scale).squeeze(1)
         mel_Lengths = torch.clamp_min(torch.sum(durations, dim= 1), 1.0).long()
