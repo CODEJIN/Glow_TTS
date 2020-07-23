@@ -181,8 +181,10 @@ class Trainer:
                     self.model_Dict['Speaker_Embedding'](mels_for_embedding),
                     samples= hp_Dict['Speaker_Embedding']['GE2E']['Inference']['Samples']
                     )
+            speakers= None
         else:
             embeddings = None
+            speakers= speakers.to(device)
 
         z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
             tokens= tokens,
@@ -190,6 +192,7 @@ class Trainer:
             mels= mels,
             mel_lengths= mel_lengths,
             speaker_embeddings= embeddings,
+            speakers= speakers,
             is_training= True
             )
 
