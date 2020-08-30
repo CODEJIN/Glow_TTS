@@ -179,6 +179,84 @@ class Decoder(torch.nn.Module):
         return x, (None if reverse else torch.sum(torch.stack(log_Dets), dim= 0))
 
 
+
+class Prosody_Encoder(torch.nn.Module):
+    '''
+    This is GST layer
+    '''
+    def __init__(self):
+        super(Prosody_Encoder, self).__init__()
+
+        self.layer_Dict = torch.nn.ModuleDict()
+
+        previous_Channels = 1
+        height = hp_Dict['Sound']['Mel_Dim']
+        for index, (kernel_Size, channels, strides) in enumerate(zip(
+            hp_Dict['Prosody_Encoder']['Reference_Encoder']['Conv']['Kernel_Size'],
+            hp_Dict['Prosody_Encoder']['Reference_Encoder']['Conv']['Channels'],
+            hp_Dict['Prosody_Encoder']['Reference_Encoder']['Conv']['Strides']
+            )):
+            self.layer_Dict['Conv_{}'.format(index)] = torch.nn.Sequential()
+            self.layer_Dict['Conv_{}'.format(index)].add_module('Conv', Conv2d(
+                in_channels= previous_Channels,
+                out_channels= channels,
+                kernel_size= kernel_Size,
+                stride= strides,
+                padding= (kernel_Size - 1) // 2,
+                bias= False,
+                w_init_gain= 'relu'
+                ))
+            self.layer_Dict['Conv_{}'.format(index)].add_module('ReLU', torch.nn.ReLU(inplace= True))
+            previous_Channels = channels
+            height = math.ceil(height /  strides)
+            
+        self.layer_Dict['GRU'] = torch.nn.GRU(
+            input_size= previous_Channels * height,
+            hidden_size= hp_Dict['Prosody_Encoder']['Reference_Encoder']['GRU']['Size'],
+            num_layers= hp_Dict['Prosody_Encoder']['Reference_Encoder']['GRU']['Stacks'],
+            batch_first= True
+            )
+
+        self.layer_Dict['Attention'] = Multihead_Attention(
+            query_channels= hp_Dict['Prosody_Encoder']['Reference_Encoder']['GRU']['Size'],
+            key_channels= hp_Dict['Prosody_Encoder']['Style_Token']['Size'],
+            out_channels= hp_Dict['Prosody_Encoder']['Size'],
+            num_heads= hp_Dict['Prosody_Encoder']['Style_Token']['Attention_Head'],
+            )
+
+        self.gst_Tokens = torch.nn.Parameter(
+            data= torch.FloatTensor(
+                hp_Dict['Prosody_Encoder']['Style_Token']['Size'],
+                hp_Dict['Prosody_Encoder']['Style_Token']['Num_Tokens']
+                )
+            )
+        torch.nn.init.normal_(self.gst_Tokens, mean= 0.0, std= 0.5)
+
+    def forward(self, x, lengths):
+        x = x.unsqueeze(1)  # [Batch, 1, Mel_d, Time]
+        for index in range(len(hp_Dict['Prosody_Encoder']['Reference_Encoder']['Conv']['Kernel_Size'])):
+            x = self.layer_Dict['Conv_{}'.format(index)](x)
+        
+        x = x.view(x.size(0), x.size(1) * x.size(2), x.size(3))     # [Batch, Dim, Compressed_Time]
+        x = self.layer_Dict['GRU'](x.transpose(2, 1))[0].transpose(2, 1)
+
+        indices = torch.ceil(lengths / np.prod(hp_Dict['Prosody_Encoder']['Reference_Encoder']['Conv']['Strides'], dtype=float)).to(dtype= lengths.dtype) - 1
+        x = torch.stack([x[batch_Index, :, step] for batch_Index, step in enumerate(indices)], dim= 0)  # [Batch, Dim]
+
+        x, _ = self.layer_Dict['Attention'](    # [Batch, Dim, 1]
+            queries= x.unsqueeze(2),    # [Batch, Dim, 1(Time)]
+            keys= torch.tanh(self.gst_Tokens).unsqueeze(0).expand(
+                x.size(0),
+                self.gst_Tokens.size(0),
+                self.gst_Tokens.size(1)
+                )  # [Batch, GST_dim, N_GST]
+            )
+        
+        return x
+
+
+
+
 class Prenet(torch.nn.Module):
     def __init__(self, stacks):
         super(Prenet, self).__init__()
