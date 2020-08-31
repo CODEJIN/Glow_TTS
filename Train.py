@@ -352,17 +352,20 @@ class Trainer:
             plt.close(new_Figure)
 
         os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
+        os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'Mel').replace('\\', '/'), exist_ok= True)
+        os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'Attention').replace('\\', '/'), exist_ok= True)
+        
         for index, (mel, file) in enumerate(zip(
             mels.cpu().numpy(),
             files
             )):
             np.save(
-                os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
+                os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', 'Mel', file).replace('\\', '/'),
                 mel.T,
                 allow_pickle= False
                 )
             np.save(
-                os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), file).replace('\\', '/'),
+                os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', 'Attention', file).replace('\\', '/'),
                 attentions.cpu().numpy()[index],
                 allow_pickle= False
                 )
@@ -383,7 +386,7 @@ class Trainer:
         #         files
         #         )):
         #         wavfile.write(
-        #             filename= os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV', '{}.WAV'.format(file)).replace('\\', '/'),
+        #             filename= os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV', '{}.wav'.format(file)).replace('\\', '/'),
         #             data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
         #             rate= hp.Sound.Sample_Rate
         #             )
