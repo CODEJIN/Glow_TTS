@@ -24,7 +24,6 @@ Encoder:
         Attention:
             Heads: 2
             Window_Size: 4
-            Dropout_Rate: 0.1
         Conv:
             Kernel_Size: 3
             Calc_Channels: 768   #Ch -> Calc_Ch -> Ch
@@ -59,8 +58,8 @@ WaveNet:
     Upsample:
         Scales: [4, 4, 4, 4]
         Pad: 2
-    Checkpoint_Path: null
-    # Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
+    # Checkpoint_Path: null
+    Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
 
 Speaker_Embedding:
     Type: 'GE2E'    #null, LUT, GE2E
@@ -99,17 +98,16 @@ Train:
             Min: 10
             Max: 150
     Num_Workers: 4
-    Batch_Size: 48
+    Batch_Size: 128
     Learning_Rate:
-        Initial: 1.0e-4
-        Decay_Step: 1000
-        Decay_Rate: 0.995
+        Initial: 1.0e-3
+        Base: 4000     # This is similar warmup step, but no warmup because of radam.
     ADAM:
         Beta1: 0.9
         Beta2: 0.999
         Epsilon: 1.0e-6
     Gradient_Norm: 5.0
-    Max_Step: 200000
+    Max_Step: 400000
     Checkpoint_Save_Interval: 1000
     Logging_Interval: 100
     Evaluation_Interval: 1000
@@ -117,8 +115,8 @@ Train:
     Initial_Inference: false
 
 Inference_Batch_Size: 8 #null
-Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi/Log'
+Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi2/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi2/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi2/Log'
 Use_Mixed_Precision: true  # apex is required.
 Device: '0'
