@@ -3,6 +3,7 @@ import numpy as np
 import yaml, logging, math
 
 from RPR_MHA import RPR_Multihead_Attention
+from Speaker_Embedding.Modules import Encoder as GE2E, Normalize as GE2E_Normalize
 
 from Arg_Parser import Recursive_Parse
 hp = Recursive_Parse(yaml.load(
@@ -25,7 +26,12 @@ class GlowTTS(torch.nn.Module):
                     )
                 torch.nn.init.uniform_(self.layer_Dict['LUT'].weight, -0.1, 0.1)
             elif hp.Speaker_Embedding.Type.upper() == 'GE2E':
-                pass
+                self.layer_Dict['GE2E'] = GE2E(
+                    mel_dims= hp.Sound.Mel_Dim,
+                    lstm_size= hp.Speaker_Embedding.GE2E.LSTM.Sizes,
+                    lstm_stacks= hp.Speaker_Embedding.GE2E.LSTM.Stacks,
+                    embedding_size= hp.Speaker_Embedding.Embedding_Size,
+                    )
             else:
                 raise ValueError('Unsupported Speaker embedding type: {}'.format(hp.Speaker_Embedding.Type))
         
@@ -42,30 +48,46 @@ class GlowTTS(torch.nn.Module):
         token_lengths,
         mels,
         mel_lengths,
-        speaker_embeddings,
         speakers,
-        noise_scale= 1.0,
-        length_scale= 1.0,
-        is_training= False
+        mels_for_ge2e
         ):
-        if not speakers is None:
-            speaker_embeddings = self.layer_Dict['LUT'](speakers)
-            
-        if is_training:
-            return self.forward_train(tokens, token_lengths, mels, mel_lengths, speaker_embeddings)
-        else:
-            return self.forward_inference(tokens, token_lengths, speaker_embeddings, noise_scale, length_scale)
+        '''
+        For train.
 
-    def forward_train(self, tokens, token_lengths, mels, mel_lengths, speaker_embeddings= None):
+        token: [Batch, Token_t] # Input text
+        token_lengths: [Batch]  # Length of input text
+        mels: [Batch, Mel_d, Mel_t] # Target and input of prosody encoder
+        mel_lengths: [Batch]    # Length of target/prosody encoder
+        speakers: [Batch]   # Indice of speaker.
+        mels_for_ge2e: [Batch * Samples, Mel_d, Mel_SE_t]    # Input of speaker embedding
+        '''
         assert all(mel_lengths % hp.Decoder.Num_Squeeze == 0), 'Mel lengths must be diviable by Num_Squeeze.'
+        
+        if 'LUT' in self.layer_Dict.keys():
+            speakers = self.layer_Dict['LUT'](speakers)
+        elif 'GE2E' in self.layer_Dict.keys():
+            speakers = self.layer_Dict['GE2E'](mels_for_ge2e)
+            speakers = GE2E_Normalize(speakers).detach()    # GE2E is pre-trained.
+        else:
+            speakers = None
+
+        if 'Prosody_Encoder' in self.layer_Dict.keys():
+            prosodies = self.layer_Dict['Prosody_Encoder'](mels, mel_lengths)
+        else:
+            prosodies = None
+
+        if hp.Device != '-1': torch.cuda.synchronize()
+
         token_Masks = self.Mask_Generate(token_lengths)
         mel_Masks = self.Mask_Generate(mel_lengths)
 
-        mean, log_Std, log_Durations, token_Masks = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embeddings)
-        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks, speaker_embeddings)
+        mean, log_Std, log_Durations, token_Masks = self.layer_Dict['Encoder'](tokens, token_Masks, speakers, prosodies)
+        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks, speakers, prosodies)
         
         attention_Masks = torch.unsqueeze(token_Masks, -1) * torch.unsqueeze(mel_Masks, 2)
         attention_Masks = attention_Masks.squeeze(1)
+
+        if hp.Device != '-1': torch.cuda.synchronize()
 
         with torch.no_grad():
             std_Square_R = torch.exp(-2 * log_Std)
@@ -78,16 +100,58 @@ class GlowTTS(torch.nn.Module):
 
             attentions = self.layer_Dict['Maximum_Path_Generater'](log_P, attention_Masks)
 
+        if hp.Device != '-1': torch.cuda.synchronize()
+
         mel_Mean = mean @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
         mel_Log_Std = log_Std @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
         log_Duration_Targets = torch.log(torch.sum(attentions.unsqueeze(1), dim= -1) + 1e-7) * token_Masks
 
+        if hp.Device != '-1': torch.cuda.synchronize()
+
         return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets
 
-    def forward_inference(self, tokens, token_lengths, speaker_embeddings= None, noise_scale= 1.0, length_scale= 1.0):
+    def inference(
+        self,
+        tokens,
+        token_lengths,
+        mels_for_prosody,
+        mel_lengths_for_prosody,
+        speakers,
+        mels_for_ge2e,
+        noise_scale= 1.0,
+        length_scale= 1.0
+        ):
+        '''
+        For inference.
+        token: [Batch, Token_t] # Input text
+        token_lengths: [Batch]  # Length of input text
+        mels_for_prosody: [Batch, Mel_d, Mel_t] # Input of prosody encoder
+        mel_lengths_for_prosody: [Batch]    # Length of input mel for prosody
+        speakers: [Batch] or None   # Indice of speaker. Only when hp.Speaker_Embedding.Type.upper() == 'LUT'
+        mels_for_ge2e: [Batch * Samples, Mel_d, Mel_SE_t]    # Input of speaker embedding
+        noise_scale: scalar of float
+        length_scale: scalar of float or [Batch]. (I may change this to matrix to control speed letter by letter later)
+        '''        
+        if 'LUT' in self.layer_Dict.keys():
+            speakers = self.layer_Dict['LUT'](speakers)
+        elif 'GE2E' in self.layer_Dict.keys():
+            speakers = self.layer_Dict['GE2E'](mels_for_ge2e)
+            speakers = GE2E_Normalize(speakers)
+        else:
+            speakers = None
+
+        if 'Prosody_Encoder' in self.layer_Dict.keys():
+            prosodies = self.layer_Dict['Prosody_Encoder'](mels_for_prosody, mel_lengths_for_prosody)
+        else:
+            prosodies = None
+
+        if hp.Device != '-1': torch.cuda.synchronize()
+
         token_Masks = self.Mask_Generate(token_lengths)
-        mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embeddings)        
+        mean, log_Std, log_Durations, mask = self.layer_Dict['Encoder'](tokens, token_Masks, speakers, prosodies)
         length_scale = length_scale.unsqueeze(-1).unsqueeze(-1)
+
+        if hp.Device != '-1': torch.cuda.synchronize()
 
         durations = torch.ceil(torch.exp(log_Durations) * mask * length_scale).squeeze(1)
         mel_Lengths = torch.clamp_min(torch.sum(durations, dim= 1), 1.0).long()
@@ -98,13 +162,19 @@ class GlowTTS(torch.nn.Module):
 
         attentions = self.Path_Generate(durations, attention_Masks) # [Batch, Token_t, Mel_t]
 
+        if hp.Device != '-1': torch.cuda.synchronize()
+
         mel_Mean = mean @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
         mel_Log_Std = log_Std @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
         noises = torch.randn_like(mel_Mean) * noise_scale
-        
+
+        if hp.Device != '-1': torch.cuda.synchronize()
+
         z = (mel_Mean + torch.exp(mel_Log_Std) * noises) * mel_Masks
         
-        mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, speaker_embeddings, reverse= True)
+        mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, speakers, prosodies, reverse= True)
+
+        if hp.Device != '-1': torch.cuda.synchronize()
 
         return mels, attentions
 
@@ -157,7 +227,7 @@ class Encoder(torch.nn.Module):
             )
         self.layer_Dict['Duration_Predictor'] = Duration_Predictor()
 
-    def forward(self, x, mask, speaker_embedding= None):
+    def forward(self, x, mask, speakers= None, prosodies= None):
         '''
         x: [Batch, Time]
         lengths: [Batch]
@@ -171,7 +241,7 @@ class Encoder(torch.nn.Module):
             [hp.Sound.Mel_Dim, hp.Sound.Mel_Dim],
             dim= 1
             )
-        log_Durations = self.layer_Dict['Duration_Predictor'](x.detach(), mask, speaker_embedding)
+        log_Durations = self.layer_Dict['Duration_Predictor'](x.detach(), mask, speakers, prosodies)
 
         return mean, log_Std, log_Durations, mask
 
@@ -187,12 +257,12 @@ class Decoder(torch.nn.Module):
         for index in range(hp.Decoder.Stack):
             self.layer_Dict['Flows'].append(AIA())
 
-    def forward(self, x, mask, speaker_embedding= None, reverse= False):
+    def forward(self, x, mask, speakers= None, prosodies= None, reverse= False):
         x, mask = self.layer_Dict['Squeeze'](x, mask)
 
         log_Dets = []
         for flow in  reversed(self.layer_Dict['Flows']) if reverse else self.layer_Dict['Flows']:
-            x, logdet = flow(x, mask, speaker_embedding, reverse= reverse)
+            x, logdet = flow(x, mask, speakers, prosodies, reverse= reverse)
             log_Dets.extend(logdet)
 
         x, mask = self.layer_Dict['Unsqueeze'](x, mask)
@@ -273,7 +343,7 @@ class Prosody_Encoder(torch.nn.Module):
                 )  # [Batch, GST_dim, N_GST]
             )
         
-        return x
+        return x.squeeze(2)
 
 
 class Prenet(torch.nn.Module):
@@ -360,7 +430,7 @@ class ANCRDCN(torch.nn.Module):
             out_channels= hp.Encoder.Channels,
             num_heads= hp.Encoder.Transformer.Attention.Heads,
             relative_postion_clipping_distance= hp.Encoder.Transformer.Attention.Window_Size,
-            dropout_rate= hp.Encoder.Transformer.Attention.Dropout_Rate,
+            dropout_rate= hp.Encoder.Transformer.Dropout_Rate,
             )
 
         self.layer_Dict['LayerNorm_0'] = torch.nn.LayerNorm(    # This normalize last dim...
@@ -423,26 +493,32 @@ class Duration_Predictor(torch.nn.Module):
         super(Duration_Predictor, self).__init__()
         self.layer_Dict = torch.nn.ModuleDict()
 
-        previous_channels = hp.Encoder.Channels
-        if not hp.Speaker_Embedding.GE2E.Checkpoint_Path is None:
-            previous_channels += hp.Speaker_Embedding.Embedding_Size
+        previous_Channels = hp.Encoder.Channels
+        if hp.Mode.upper() in ['SE', 'GR']:
+            previous_Channels += hp.Speaker_Embedding.Embedding_Size
+        if hp.Mode.upper() in ['PE', 'GR']:
+            previous_Channels += hp.Prosody_Encoder.Size
+
         for index in range(hp.Encoder.Duration_Predictor.Stacks):
-            self.layer_Dict['CRND_{}'.format(index)] = CRND(in_channels= previous_channels)
-            previous_channels = hp.Encoder.Duration_Predictor.Channels
+            self.layer_Dict['CRND_{}'.format(index)] = CRND(in_channels= previous_Channels)
+            previous_Channels = hp.Encoder.Duration_Predictor.Channels
 
         self.layer_Dict['Projection'] = Conv1d(
-            in_channels= previous_channels,
+            in_channels= previous_Channels,
             out_channels= 1,
             kernel_size= 1,
             w_init_gain= 'linear'
             )
 
-    def forward(self, x, x_mask, speaker_embedding= None):
-        if not speaker_embedding is None:
-            x = torch.cat(
-                [x, speaker_embedding.unsqueeze(2).expand(-1, -1, x.size(2))],
-                dim= 1
-                )
+    def forward(self, x, x_mask, speakers= None, prosodies= None):
+        step = x.size(2)
+        x = [x]
+        if not speakers is None:
+            x.append(speakers.unsqueeze(2).expand(-1, -1, step))
+        if not prosodies is None:
+            x.append(prosodies.unsqueeze(2).expand(-1, -1, step))
+        x = torch.cat(x, dim= 1)
+
         for index in range(hp.Encoder.Duration_Predictor.Stacks):
             x = self.layer_Dict['CRND_{}'.format(index)](x, x_mask)
         x = self.layer_Dict['Projection'](x * x_mask)
@@ -491,10 +567,10 @@ class AIA(torch.nn.Module):
         self.layers.append(Invertible_1x1_Conv())
         self.layers.append(Affine_Coupling_Layer())
 
-    def forward(self, x, mask, speaker_embedding, reverse= False):
+    def forward(self, x, mask, speakers, prosodies, reverse= False):
         logdets = []
         for layer in (reversed(self.layers) if reverse else self.layers):
-            x, logdet = layer(x, mask, speaker_embedding= speaker_embedding, reverse= reverse)
+            x, logdet = layer(x, mask, speakers= speakers, prosodies= prosodies, reverse= reverse)
             logdets.append(logdet)
         
         return x, logdets
@@ -609,7 +685,7 @@ class Affine_Coupling_Layer(torch.nn.Module):
             w_init_gain= 'zero'
             )
 
-    def forward(self, x, mask, speaker_embedding= None, reverse= False):
+    def forward(self, x, mask, speakers= None, prosodies= None, reverse= False):
         batch, channels, time = x.size()
         if mask is None:
             mask = 1
@@ -621,7 +697,7 @@ class Affine_Coupling_Layer(torch.nn.Module):
             )
         
         x = self.layer_Dict['Start'](x_a) * mask
-        x = self.layer_Dict['WaveNet'](x, mask, speaker_embedding)
+        x = self.layer_Dict['WaveNet'](x, mask, speakers, prosodies)
         outs = self.layer_Dict['End'](x)
 
         mean, logs = torch.split(
@@ -660,9 +736,17 @@ class WaveNet(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ))
-            if not hp.Speaker_Embedding.GE2E.Checkpoint_Path is None:
-                self.layer_Dict['Speaker_Embedding_{}'.format(index)] = torch.nn.utils.weight_norm(Conv1d(
+
+            if hp.Mode.upper() in ['SE', 'GR']:
+                self.layer_Dict['Speaker_{}'.format(index)] = torch.nn.utils.weight_norm(Conv1d(
                     in_channels= hp.Speaker_Embedding.Embedding_Size,
+                    out_channels= hp.Decoder.Affine_Coupling.Calc_Channels * 2,
+                    kernel_size= 1,
+                    w_init_gain= ['tanh', 'sigmoid']
+                    ))
+            if hp.Mode.upper() in ['PE', 'GR']:
+                self.layer_Dict['Prosody_{}'.format(index)] = torch.nn.utils.weight_norm(Conv1d(
+                    in_channels= hp.Prosody_Encoder.Size,
                     out_channels= hp.Decoder.Affine_Coupling.Calc_Channels * 2,
                     kernel_size= 1,
                     w_init_gain= ['tanh', 'sigmoid']
@@ -672,13 +756,15 @@ class WaveNet(torch.nn.Module):
             p= hp.Decoder.Affine_Coupling.WaveNet.Dropout_Rate
             )
 
-    def forward(self, x, mask, speaker_embedding= None):
+    def forward(self, x, mask, speakers= None, prosodies= None):
         output = torch.zeros_like(x)
         for index in range(hp.Decoder.Affine_Coupling.WaveNet.Num_Layers):
             ins = self.layer_Dict['In_{}'.format(index)](x)     # [Batch, Channels, Time]
             ins = self.layer_Dict['Dropout'](ins)
-            if not speaker_embedding is None:
-                ins += self.layer_Dict['Speaker_Embedding_{}'.format(index)](speaker_embedding.unsqueeze(2))     # [Batch, Channels, Time] + [Batch, Channels, 1] -> [Batch, Channels, Time]
+            if not speakers is None:
+                ins += self.layer_Dict['Speaker_{}'.format(index)](speakers.unsqueeze(2))     # [Batch, Channels, Time] + [Batch, Channels, 1] -> [Batch, Channels, Time]
+            if not prosodies is None:
+                ins += self.layer_Dict['Prosody_{}'.format(index)](prosodies.unsqueeze(2))     # [Batch, Channels, Time] + [Batch, Channels, 1] -> [Batch, Channels, Time]
             acts = self.fused_gate(ins)
             res_Skips = self.layer_Dict['Res_Skip_{}'.format(index)](acts)
             if index < hp.Decoder.Affine_Coupling.WaveNet.Num_Layers - 1:
@@ -695,7 +781,7 @@ class WaveNet(torch.nn.Module):
         return output * mask
 
     def fused_gate(self, x):
-        tanh, sigmoid = torch.chunk(tensor= x, chunks= 2, dim= 1)
+        tanh, sigmoid = x.chunk(chunks= 2, dim= 1)
         return torch.tanh(tanh) * torch.sigmoid(sigmoid)
 
 
@@ -798,12 +884,14 @@ class Conv1d(torch.nn.Conv1d):
         super(Conv1d, self).__init__(*args, **kwargs)
 
     def reset_parameters(self):
-        if isinstance(self.w_init_gain, str):
-            gains = [self.w_init_gain]
+        gains = self.w_init_gain
+        if isinstance(gains, str):
+            gains = [gains]
         
-        weights = torch.chunk(self.weight, len(self.w_init_gain), dim= 0)
+        
+        weights = torch.chunk(self.weight, len(gains), dim= 0)
         for gain, weight in zip(gains, weights):
-            if gain == ['zero']:
+            if gain == 'zero':
                 torch.nn.init.zeros_(weight)
             elif gain in ['relu', 'leaky_relu']:
                 torch.nn.init.kaiming_uniform_(weight, nonlinearity= gain)

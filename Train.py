@@ -10,12 +10,12 @@ import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import sample
 
+from Logger import Logger
 from Modules import GlowTTS, MLE_Loss
-from Datasets import Train_Dataset, Dev_Dataset, Inference_Dataset, Collater, Inference_Collater
+from Datasets import Dataset, Inference_Dataset, Collater, Inference_Collater
 from Noam_Scheduler import Modified_Noam_Scheduler
 from Radam import RAdam
 
-from PWGAN.Modules import Generator as PWGAN
 from Speaker_Embedding.Modules import Encoder as Speaker_Embedding, Normalize
 
 from Arg_Parser import Recursive_Parse
@@ -45,9 +45,6 @@ if hp.Use_Mixed_Precision:
     except:
         logging.info('There is no apex modules in the environment. Mixed precision does not work.')
         hp.Use_Mixed_Precision = False
-        
-
-# torch.autograd.set_detect_anomaly(True)
 
 class Trainer:
     def __init__(self, steps= 0):
@@ -63,16 +60,35 @@ class Trainer:
             }
 
         self.writer_Dict = {
-            'Train': SummaryWriter(os.path.join(hp.Log_Path, 'Train')),
-            'Evaluation': SummaryWriter(os.path.join(hp.Log_Path, 'Evaluation')),
+            'Train': Logger(os.path.join(hp.Log_Path, 'Train')),
+            'Evaluation': Logger(os.path.join(hp.Log_Path, 'Evaluation')),
             }
         
         self.Load_Checkpoint()
 
     def Datset_Generate(self):
-        train_Dataset = Train_Dataset()
-        dev_Dataset = Dev_Dataset()
-        inference_Dataset = Inference_Dataset()
+        train_Dataset = Dataset(
+            pattern_path= hp.Train.Train_Pattern.Path,
+            metadata_file= hp.Train.Train_Pattern.Metadata_File,
+            accumulated_dataset_epoch= hp.Train.Train_Pattern.Accumulated_Dataset_Epoch,
+            mel_length_min= hp.Train.Train_Pattern.Mel_Length.Min,
+            mel_length_max= hp.Train.Train_Pattern.Mel_Length.Max,
+            text_length_min= hp.Train.Train_Pattern.Text_Length.Min,
+            text_length_max= hp.Train.Train_Pattern.Text_Length.Max,
+            use_cache = hp.Train.Use_Pattern_Cache
+            )
+        dev_Dataset = Dataset(
+            pattern_path= hp.Train.Eval_Pattern.Path,
+            metadata_file= hp.Train.Eval_Pattern.Metadata_File,
+            mel_length_min= hp.Train.Eval_Pattern.Mel_Length.Min,
+            mel_length_max= hp.Train.Eval_Pattern.Mel_Length.Max,
+            text_length_min= hp.Train.Eval_Pattern.Text_Length.Min,
+            text_length_max= hp.Train.Eval_Pattern.Text_Length.Max,
+            use_cache = hp.Train.Use_Pattern_Cache 
+            )
+        inference_Dataset = Inference_Dataset(
+            pattern_path= hp.Train.Inference_Pattern_File_in_Train
+            )
         logging.info('The number of train patterns = {}.'.format(len(train_Dataset) // hp.Train.Train_Pattern.Accumulated_Dataset_Epoch))
         logging.info('The number of development patterns = {}.'.format(len(dev_Dataset)))
         logging.info('The number of inference patterns = {}.'.format(len(inference_Dataset)))
@@ -111,9 +127,6 @@ class Trainer:
             'GlowTTS': GlowTTS().to(device)
             }
 
-        if not hp.WaveNet.Checkpoint_Path is None:
-            self.model_Dict['PWGAN'] = PWGAN().to(device)
-
         if not hp.Speaker_Embedding.GE2E.Checkpoint_Path is None:
             self.model_Dict['Speaker_Embedding'] = Speaker_Embedding(
                 mel_dims= hp.Sound.Mel_Dim,
@@ -131,62 +144,39 @@ class Trainer:
             lr= hp.Train.Learning_Rate.Initial,
             betas=(hp.Train.ADAM.Beta1, hp.Train.ADAM.Beta2),
             eps= hp.Train.ADAM.Epsilon,
+            weight_decay= hp.Train.Weight_Decay
             )
         self.scheduler = Modified_Noam_Scheduler(
             optimizer= self.optimizer,
-            step_size= hp.Train.Learning_Rate.Decay_Step,
-            gamma= hp.Train.Learning_Rate.Decay_Rate,
+            base = hp.Train.Learning_Rate.Base
             )
 
         if hp.Use_Mixed_Precision:
-            models = [self.model_Dict['GlowTTS']]
-            if not hp.WaveNet.Checkpoint_Path is None:
-                models.append(self.model_Dict['PWGAN'])
-            if not hp.Speaker_Embedding.GE2E.Checkpoint_Path is None:
-                models.append(self.model_Dict['Speaker_Embedding'])
-                
-            models, self.optimizer = amp.initialize(
-                models= models,
+            self.model_Dict['GlowTTS'], self.optimizer = amp.initialize(
+                models= self.model_Dict['GlowTTS'],
                 optimizers=self.optimizer
                 )
-            
-            self.model_Dict['GlowTTS'] = models[0]
-            if not hp.WaveNet.Checkpoint_Path is None:
-                self.model_Dict['PWGAN'] = models[1]
-            if not hp.Speaker_Embedding.GE2E.Checkpoint_Path is None:
-                self.model_Dict['Speaker_Embedding'] = models[-1]
 
         logging.info(self.model_Dict['GlowTTS'])
 
 
-    def Train_Step(self, tokens, token_lengths, mels, mel_lengths, mels_for_embedding= None, speakers= None):
+    def Train_Step(self, tokens, token_lengths, mels, mel_lengths, speakers, mels_for_ge2e):
         loss_Dict = {}
 
         tokens = tokens.to(device)
         token_lengths = token_lengths.to(device)
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
-
-        if not mels_for_embedding is None:
-            with torch.no_grad():
-                mels_for_embedding = mels_for_embedding.to(device)
-                embeddings = Normalize(
-                    self.model_Dict['Speaker_Embedding'](mels_for_embedding),
-                    samples= hp.Speaker_Embedding.GE2E.Inference.Samples
-                    )
-            speakers= None
-        else:
-            embeddings = None
-            speakers= speakers.to(device)
+        speakers = speakers.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
 
         z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
             tokens= tokens,
             token_lengths= token_lengths,
             mels= mels,
             mel_lengths= mel_lengths,
-            speaker_embeddings= embeddings,
             speakers= speakers,
-            is_training= True
+            mels_for_ge2e= mels_for_ge2e
             )
 
         loss_Dict['MLE'] = self.criterion_Dict['MLE'](
@@ -208,7 +198,7 @@ class Trainer:
                 max_norm= hp.Train.Gradient_Norm
                 )
         else:
-            loss_Dict['Loss'].backward()        
+            loss_Dict['Loss'].backward()
             torch.nn.utils.clip_grad_norm_(
                 parameters= self.model_Dict['GlowTTS'].parameters(),
                 max_norm= hp.Train.Gradient_Norm
@@ -219,11 +209,11 @@ class Trainer:
         self.tqdm.update(1)
 
         for tag, loss in loss_Dict.items():
-            self.scalar_Dict['Train.Loss/{}'.format(tag)] += loss
+            self.scalar_Dict['Train']['Loss/{}'.format(tag)] += loss
 
     def Train_Epoch(self):
-        for tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding, speakers in self.dataLoader_Dict['Train']:
-            self.Train_Step(tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding, speakers)
+        for tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E in self.dataLoader_Dict['Train']:
+            self.Train_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E)
             
             if self.steps % hp.Train.Checkpoint_Save_Interval == 0:
                 self.Save_Checkpoint()
@@ -234,7 +224,7 @@ class Trainer:
                     for tag, loss in self.scalar_Dict['Train'].items()
                     }
                 self.scalar_Dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()
-                self.Write_to_Tensorboard('Train', self.scalar_Dict['Train'])
+                self.writer_Dict['Train'].add_scalar_dict(self.scalar_Dict['Train'], self.steps)
                 self.scalar_Dict['Train'] = defaultdict(float)
 
             if self.steps % hp.Train.Evaluation_Interval == 0:
@@ -249,31 +239,23 @@ class Trainer:
         self.epochs += hp.Train.Train_Pattern.Accumulated_Dataset_Epoch
 
     @torch.no_grad()
-    def Evaluation_Step(self, tokens, token_lengths, mels, mel_lengths, mels_for_embedding= None, speakers= None):
+    def Evaluation_Step(self, tokens, token_lengths, mels, mel_lengths, speakers, mels_for_ge2e):
         loss_Dict = {}
 
         tokens = tokens.to(device)
         token_lengths = token_lengths.to(device)
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
-
-        if not mels_for_embedding is None:
-            with torch.no_grad():
-                mels_for_embedding = mels_for_embedding.to(device)
-                embeddings = Normalize(
-                    self.model_Dict['Speaker_Embedding'](mels_for_embedding),
-                    samples= hp.Speaker_Embedding.GE2E.Inference.Samples
-                    )
-        else:
-            embeddings = None
+        speakers = speakers.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
 
         z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
             tokens= tokens,
             token_lengths= token_lengths,
             mels= mels,
             mel_lengths= mel_lengths,
-            speaker_embeddings= embeddings,
-            is_training= True
+            speakers= speakers,
+            mels_for_ge2e= mels_for_ge2e
             )
 
         loss_Dict['MLE'] = self.criterion_Dict['MLE'](
@@ -287,7 +269,7 @@ class Trainer:
         loss_Dict['Loss'] = loss_Dict['MLE'] + loss_Dict['Length']
 
         for tag, loss in loss_Dict.items():
-            self.scalar_Dict['Evaluation.Loss/{}'.format(tag)] += loss
+            self.scalar_Dict['Evaluation']['Loss/{}'.format(tag)] += loss
     
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
@@ -295,18 +277,19 @@ class Trainer:
         for model in self.model_Dict.values():
             model.eval()
 
-        for step, (tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding, speakers) in tqdm(
+        for step, (tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E) in tqdm(
             enumerate(self.dataLoader_Dict['Dev'], 1),
             desc='[Evaluation]',
             total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp.Train.Batch_Size)
             ):
-            self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding, speakers)
+            self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E)
 
         self.scalar_Dict['Evaluation'] = {
             tag: loss / step
             for tag, loss in self.scalar_Dict['Evaluation'].items()
             }
-        self.Write_to_Tensorboard('Evaluation', self.scalar_Dict['Evaluation'])
+        self.writer_Dict['Evaluation'].add_scalar_dict(self.scalar_Dict['Evaluation'], self.steps)
+        self.writer_Dict['Evaluation'].add_histogram_model(self.model_Dict['GlowTTS'], self.steps, delete_keywords=['layer_Dict', 'layer', 'GE2E'])
         self.scalar_Dict['Evaluation'] = defaultdict(float)
 
         for model in self.model_Dict.values():
@@ -314,31 +297,27 @@ class Trainer:
 
 
     @torch.no_grad()
-    def Inference_Step(self, tokens, token_lengths, length_scales, mels_for_embedding, speakers, labels, texts, start_index= 0, tag_step= False, tag_index= False):
+    def Inference_Step(self, tokens, token_lengths, mels_for_prosody, mel_lengths_for_prosody, speakers, mels_for_ge2e, length_scales, labels, texts, start_index= 0, tag_step= False, tag_index= False):
         tokens = tokens.to(device)
         token_lengths = token_lengths.to(device)
+        mels_for_prosody = mels_for_prosody.to(device)
+        mel_lengths_for_prosody = mel_lengths_for_prosody.to(device)
+        speakers = speakers.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
         length_scales = length_scales.to(device)
 
-        if not mels_for_embedding is None:
-            with torch.no_grad():
-                mels_for_embedding = mels_for_embedding.to(device)
-                embeddings = Normalize(
-                    self.model_Dict['Speaker_Embedding'](mels_for_embedding),
-                    samples= hp.Speaker_Embedding.GE2E.Inference.Samples
-                    )
-        else:
-            embeddings = None
-
-        mels, attentions = self.model_Dict['GlowTTS'](
+        mels, attentions = self.model_Dict['GlowTTS'].inference(
             tokens= tokens,
             token_lengths= token_lengths,
-            length_scale= length_scales,
-            speaker_embeddings= embeddings,
-            is_training= False
+            mels_for_prosody= mels_for_prosody,
+            mel_lengths_for_prosody= mel_lengths_for_prosody,
+            speakers= speakers,
+            mels_for_ge2e= mels_for_ge2e,
+            length_scale= length_scales
             )
 
         files = []
-        for label in labels:
+        for index, label in enumerate(labels):
             tags = []
             if tag_step: tags.append('Step-{}'.format(self.steps))
             tags.append(label)
@@ -372,42 +351,42 @@ class Trainer:
             plt.savefig(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'PNG', '{}.PNG'.format(file)).replace('\\', '/'))
             plt.close(new_Figure)
 
-        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
+        os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
         for index, (mel, file) in enumerate(zip(
             mels.cpu().numpy(),
             files
             )):
             np.save(
-                os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
+                os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
                 mel.T,
                 allow_pickle= False
-                )        
+                )
             np.save(
-                os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), file).replace('\\', '/'),
+                os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), file).replace('\\', '/'),
                 attentions.cpu().numpy()[index],
                 allow_pickle= False
                 )
 
-        if 'PWGAN' in self.model_Dict.keys():
-            os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
+        # if 'PWGAN' in self.model_Dict.keys():
+        #     os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
 
-            noises = torch.randn(mels.size(0), mels.size(2) * hp.Sound.Frame_Shift).to(device)
-            mels = torch.nn.functional.pad(
-                mels,
-                pad= (hp.WaveNet.Upsample.Pad, hp.WaveNet.Upsample.Pad),
-                mode= 'replicate'
-                )
-            mels.clamp_(min= -hp.Sound.Max_Abs_Mel, max= hp.Sound.Max_Abs_Mel)            
+        #     noises = torch.randn(mels.size(0), mels.size(2) * hp.Sound.Frame_Shift).to(device)
+        #     mels = torch.nn.functional.pad(
+        #         mels,
+        #         pad= (hp.WaveNet.Upsample.Pad, hp.WaveNet.Upsample.Pad),
+        #         mode= 'replicate'
+        #         )
+        #     mels.clamp_(min= -hp.Sound.Max_Abs_Mel, max= hp.Sound.Max_Abs_Mel)            
 
-            for index, (audio, file) in enumerate(zip(
-                self.model_Dict['PWGAN'](noises, mels).cpu().numpy(),
-                files
-                )):
-                wavfile.write(
-                    filename= os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV', '{}.WAV'.format(file)).replace('\\', '/'),
-                    data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
-                    rate= hp.Sound.Sample_Rate
-                    )
+        #     for index, (audio, file) in enumerate(zip(
+        #         self.model_Dict['PWGAN'](noises, mels).cpu().numpy(),
+        #         files
+        #         )):
+        #         wavfile.write(
+        #             filename= os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV', '{}.WAV'.format(file)).replace('\\', '/'),
+        #             data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
+        #             rate= hp.Sound.Sample_Rate
+        #             )
 
     def Inference_Epoch(self):
         logging.info('(Steps: {}) Start inference.'.format(self.steps))
@@ -415,20 +394,21 @@ class Trainer:
         for model in self.model_Dict.values():
             model.eval()
 
-        for step, (tokens, token_lengths, length_scales, mels_for_Embedding, speakers, labels, texts) in tqdm(
+        for step, (tokens, token_Lengths, mels_for_Prosody, mel_Lengths_for_Prosody, speakers, mels_for_GE2E, length_Scales, labels, texts) in tqdm(
             enumerate(self.dataLoader_Dict['Inference']),
             desc='[Inference]',
             total= math.ceil(len(self.dataLoader_Dict['Inference'].dataset) / (hp.Inference_Batch_Size or hp.Train.Batch_Size))
             ):
-            self.Inference_Step(tokens, token_lengths, length_scales, mels_for_Embedding, speakers, labels, texts, start_index= step * (hp.Inference_Batch_Size or hp.Train.Batch_Size))
+            self.Inference_Step(tokens, token_Lengths, mels_for_Prosody, mel_Lengths_for_Prosody, speakers, mels_for_GE2E, length_Scales, labels, texts, start_index= step * (hp.Inference_Batch_Size or hp.Train.Batch_Size))
 
         for model in self.model_Dict.values():
             model.train()
 
+
     def Load_Checkpoint(self):
         if self.steps == 0:
             paths = [
-                os.path.join(root, file).replace('\\', '/')                
+                os.path.join(root, file).replace('\\', '/')
                 for root, _, files in os.walk(hp.Checkpoint_Path)
                 for file in files
                 if os.path.splitext(file)[1] == '.pt'
@@ -441,7 +421,7 @@ class Trainer:
             path = os.path.join(hp.Checkpoint_Path, 'S_{}.pt'.format(self.steps).replace('\\', '/'))
 
         state_Dict = torch.load(path, map_location= 'cpu')
-        self.model_Dict['GlowTTS'].load_state_dict(state_Dict['Model.GlowTTS'])
+        self.model_Dict['GlowTTS'].load_state_dict(state_Dict['Model'])
         self.optimizer.load_state_dict(state_Dict['Optimizer'])
         self.scheduler.load_state_dict(state_Dict['Scheduler'])
         self.steps = state_Dict['Steps']
@@ -458,20 +438,18 @@ class Trainer:
 
         logging.info('Checkpoint loaded at {} steps.'.format(self.steps))
 
-        if not hp.WaveNet.Checkpoint_Path is None:
-            self.PWGAN_Load_Checkpoint()
-        if not hp.Speaker_Embedding.GE2E.Checkpoint_Path is None:
-            self.Speaker_Embedding_Load_Checkpoint()
+        # if not hp.WaveNet.Checkpoint_Path is None:
+        #     self.PWGAN_Load_Checkpoint()
+        if 'GE2E' in self.model_Dict['GlowTTS'].layer_Dict.keys() and self.steps == 0:
+            self.GE2E_Load_Checkpoint()
 
     def Save_Checkpoint(self):
         os.makedirs(hp.Checkpoint_Path, exist_ok= True)
 
         state_Dict = {
-            'Model': {
-                'GlowTTS': self.model_Dict['GlowTTS'].state_dict()
-                },
+            'Model': self.model_Dict['GlowTTS'].state_dict(),
             'Optimizer': self.optimizer.state_dict(),
-            'Scheduler': self.scheduler.state_dict(),            
+            'Scheduler': self.scheduler.state_dict(),
             'Steps': self.steps,
             'Epochs': self.epochs,
             }
@@ -494,33 +472,32 @@ class Trainer:
 
         logging.info('PWGAN checkpoint \'{}\' loaded.'.format(hp.WaveNet.Checkpoint_Path))
 
-    def Speaker_Embedding_Load_Checkpoint(self):
+    def GE2E_Load_Checkpoint(self):
         state_Dict = torch.load(
             hp.Speaker_Embedding.GE2E.Checkpoint_Path,
             map_location= 'cpu'
             )
-        self.model_Dict['Speaker_Embedding'].load_state_dict(state_Dict['Model'])
-
+        self.model_Dict['GlowTTS'].layer_Dict['GE2E'].load_state_dict(state_Dict['Model'])
         logging.info('Speaker embedding checkpoint \'{}\' loaded.'.format(hp.Speaker_Embedding.GE2E.Checkpoint_Path))
 
     def Train(self):
+        hp_Path = os.path.join(hp.Checkpoint_Path, 'Hyper_Parameters.yaml').replace('\\', '/')
+        if not os.path.exists(hp_Path):
+            from shutil import copyfile
+            os.makedirs(hp.Checkpoint_Path, exist_ok= True)
+            copyfile('Hyper_Parameters.yaml', hp_Path)
+
+        if self.steps == 0:
+            self.Evaluation_Epoch()
+
+        if hp.Train.Initial_Inference:
+            self.Inference_Epoch()
+
         self.tqdm = tqdm(
             initial= self.steps,
             total= hp.Train.Max_Step,
             desc='[Training]'
             )
-        
-        hp_Path = os.path.join(hp.Checkpoint_Path, 'Hyper_Parameters.yaml').replace('\\', '/')
-        if not os.path.exists(hp_Path):
-            os.makedirs(hp.Checkpoint_Path, exist_ok= True)
-            yaml.dump(hp_Dict, open(hp_Path, 'w'))
-
-        if hp.Train.Initial_Inference:
-            self.Evaluation_Epoch()
-            self.Inference_Epoch()
-
-        for model in self.model_Dict.values():
-            model.train()
 
         while self.steps < hp.Train.Max_Step:
             try:
@@ -531,10 +508,6 @@ class Trainer:
             
         self.tqdm.close()
         logging.info('Finished training.')
-
-    def Write_to_Tensorboard(self, category, scalar_Dict):
-        for tag, scalar in scalar_Dict.items():
-            self.writer_Dict[category].add_scalar(tag, scalar, self.steps)
 
 if __name__ == '__main__':
     argParser = argparse.ArgumentParser()
