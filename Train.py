@@ -5,14 +5,14 @@ from tqdm import tqdm
 from collections import defaultdict
 from tensorboardX import SummaryWriter
 import matplotlib
-# matplotlib.use('agg')
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import sample
 
 from Modules import GlowTTS, MLE_Loss
 from Datasets import Train_Dataset, Dev_Dataset, Inference_Dataset, Collater, Inference_Collater
-# from Noam_Scheduler import Noam_Scheduler
+from Noam_Scheduler import Modified_Noam_Scheduler
 from Radam import RAdam
 
 from PWGAN.Modules import Generator as PWGAN
@@ -132,7 +132,7 @@ class Trainer:
             betas=(hp.Train.ADAM.Beta1, hp.Train.ADAM.Beta2),
             eps= hp.Train.ADAM.Epsilon,
             )
-        self.scheduler = torch.optim.lr_scheduler.StepLR(
+        self.scheduler = Modified_Noam_Scheduler(
             optimizer= self.optimizer,
             step_size= hp.Train.Learning_Rate.Decay_Step,
             gamma= hp.Train.Learning_Rate.Decay_Rate,
@@ -232,8 +232,8 @@ class Trainer:
                 self.scalar_Dict['Train'] = {
                     tag: loss / hp.Train.Logging_Interval
                     for tag, loss in self.scalar_Dict['Train'].items()
-                        }
-                self.scalar_Dict['Train.Learning_Rate'] = self.scheduler.get_last_lr()
+                    }
+                self.scalar_Dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()
                 self.Write_to_Tensorboard('Train', self.scalar_Dict['Train'])
                 self.scalar_Dict['Train'] = defaultdict(float)
 
@@ -298,7 +298,7 @@ class Trainer:
         for step, (tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding, speakers) in tqdm(
             enumerate(self.dataLoader_Dict['Dev'], 1),
             desc='[Evaluation]',
-            total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp.Train.Batch_Size'])
+            total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp.Train.Batch_Size)
             ):
             self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths, mels_for_Embedding, speakers)
 
@@ -372,6 +372,22 @@ class Trainer:
             plt.savefig(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'PNG', '{}.PNG'.format(file)).replace('\\', '/'))
             plt.close(new_Figure)
 
+        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
+        for index, (mel, file) in enumerate(zip(
+            mels.cpu().numpy(),
+            files
+            )):
+            np.save(
+                os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
+                mel.T,
+                allow_pickle= False
+                )        
+            np.save(
+                os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), file).replace('\\', '/'),
+                attentions.cpu().numpy()[index],
+                allow_pickle= False
+                )
+
         if 'PWGAN' in self.model_Dict.keys():
             os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
 
@@ -391,18 +407,6 @@ class Trainer:
                     filename= os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV', '{}.WAV'.format(file)).replace('\\', '/'),
                     data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
                     rate= hp.Sound.Sample_Rate
-                    )
-        else:
-            os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
-
-            for index, (mel, file) in enumerate(zip(
-                mels.cpu().numpy(),
-                files
-                )):
-                np.save(
-                    os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
-                    mel.T,
-                    allow_pickle= False
                     )
 
     def Inference_Epoch(self):
@@ -536,6 +540,6 @@ if __name__ == '__main__':
     argParser = argparse.ArgumentParser()
     argParser.add_argument('-s', '--steps', default= 0, type= int)
     args = argParser.parse_args()
-    
+
     new_Trainer = Trainer(steps= args.steps)
     new_Trainer.Train()

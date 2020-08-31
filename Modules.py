@@ -23,6 +23,7 @@ class GlowTTS(torch.nn.Module):
                     num_embeddings= hp.Speaker_Embedding.Num_Speakers,
                     embedding_dim= hp.Speaker_Embedding.Embedding_Size,
                     )
+                torch.nn.init.uniform_(self.layer_Dict['LUT'].weight, -0.1, 0.1)
             elif hp.Speaker_Embedding.Type.upper() == 'GE2E':
                 pass
             else:
@@ -58,15 +59,14 @@ class GlowTTS(torch.nn.Module):
     def forward_train(self, tokens, token_lengths, mels, mel_lengths, speaker_embeddings= None):
         assert all(mel_lengths % hp.Decoder.Num_Squeeze == 0), 'Mel lengths must be diviable by Num_Squeeze.'
         token_Masks = self.Mask_Generate(token_lengths)
-        mean, log_Std, log_Durations, token_Masks = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embeddings)
-
         mel_Masks = self.Mask_Generate(mel_lengths)
 
+        mean, log_Std, log_Durations, token_Masks = self.layer_Dict['Encoder'](tokens, token_Masks, speaker_embeddings)
+        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks, speaker_embeddings)
+        
         attention_Masks = torch.unsqueeze(token_Masks, -1) * torch.unsqueeze(mel_Masks, 2)
         attention_Masks = attention_Masks.squeeze(1)
 
-        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks, speaker_embeddings)
-        
         with torch.no_grad():
             std_Square_R = torch.exp(-2 * log_Std)
             # [Batch, Token_t, 1] [Batch, Token_t, Mel_t] [Batch, Token_t, Mel_t] [Batch, Token_t, 1]
@@ -80,7 +80,7 @@ class GlowTTS(torch.nn.Module):
 
         mel_Mean = mean @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
         mel_Log_Std = log_Std @ attentions    # [Batch, Mel_Dim, Token_t] @ [Batch, Token_t, Mel_t] -> [Batch, Mel_dim, Mel_t]
-        log_Duration_Targets = torch.log(torch.sum(attentions.unsqueeze(1), dim= -1) + 1e-8) * token_Masks
+        log_Duration_Targets = torch.log(torch.sum(attentions.unsqueeze(1), dim= -1) + 1e-7) * token_Masks
 
         return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets
 
@@ -398,11 +398,6 @@ class ANCRDCN(torch.nn.Module):
     def forward(self, x, mask):
         x *= mask
         residual = x
-        # x = self.layer_Dict['Attention'](  # [Batch, Dim, Time]
-        #     x= x,
-        #     c= x,
-        #     attn_mask= (mask * mask.transpose(2, 1)).unsqueeze(1)
-        #     )
         x, _ = self.layer_Dict['Attention'](  # [Batch, Dim, Time]
             queries= x,
             masks= (mask * mask.transpose(2, 1)).unsqueeze(1)
@@ -538,7 +533,7 @@ class Activation_Norm(torch.nn.Module):
             mean = torch.sum(x * mask, [0, 2]) / denorm
             square = torch.sum(x * x * mask, [0, 2]) / denorm
             variance = square - (mean ** 2)
-            logs = 0.5 * torch.log(torch.clamp_min(variance, 1e-6))
+            logs = 0.5 * torch.log(torch.clamp_min(variance, 1e-7))
 
             self.logs.data.copy_(
                 (-logs).view(*self.logs.shape).to(dtype=self.logs.dtype)
@@ -585,7 +580,7 @@ class Invertible_1x1_Conv(torch.nn.Module):
         
         z = torch.nn.functional.conv2d(
             input= x,
-            weight= weight.unsqueeze(-1).unsqueeze(-1)            
+            weight= weight.unsqueeze(-1).unsqueeze(-1)
             )
         # [Batch, 2, Split/2, Dim/Split, Time]
         z = z.view(batch, 2, hp.Decoder.Num_Split // 2, channels // hp.Decoder.Num_Split, time)
@@ -776,14 +771,14 @@ class Maximum_Path_Generater(torch.nn.Module):
         for mel_Index in range(mel_length):
             for token_Index in range(max(0, token_length + mel_Index - mel_length), min(token_length, mel_Index + 1)):
                 if mel_Index == token_Index:
-                    current_Q = -1e+9
+                    current_Q = -1e+7
                 else:
                     current_Q = x[token_Index, mel_Index - 1]   # Stayed current token
                 if token_Index == 0:
                     if mel_Index == 0:
                         prev_Q = 0.0
                     else:
-                        prev_Q = -1e+9
+                        prev_Q = -1e+7
                 else:
                     prev_Q = x[token_Index - 1, mel_Index - 1]  # Moved to next token
             x[token_Index, mel_Index] = max(current_Q, prev_Q) + x[token_Index, mel_Index]
@@ -835,6 +830,9 @@ class Conv2d(torch.nn.Conv2d):
 
 class MLE_Loss(torch.nn.modules.loss._Loss):
     def forward(self, z, mean, std, log_dets, lengths):
+        '''
+        https://github.com/jaywalnut310/glow-tts/issues/6
+        '''
         loss = torch.sum(std) + 0.5 * torch.sum(torch.exp(-2 * std) * (z - mean) ** 2) - torch.sum(log_dets)
         loss /= torch.sum(lengths // hp.Decoder.Num_Squeeze) * hp.Decoder.Num_Squeeze * hp.Sound.Mel_Dim
         loss += 0.5 * math.log(2 * math.pi)    # I ignore this part because this does not affect to the gradients.
