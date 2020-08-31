@@ -5,14 +5,14 @@ from tqdm import tqdm
 from collections import defaultdict
 from tensorboardX import SummaryWriter
 import matplotlib
-# matplotlib.use('agg')
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import sample
 
 from Modules import GlowTTS, MLE_Loss
 from Datasets import Train_Dataset, Dev_Dataset, Inference_Dataset, Collater, Inference_Collater
-# from Noam_Scheduler import Noam_Scheduler
+from Noam_Scheduler import Modified_Noam_Scheduler
 from Radam import RAdam
 
 from PWGAN.Modules import Generator as PWGAN
@@ -111,7 +111,7 @@ class Trainer:
         if not hp_Dict['WaveNet']['Checkpoint_Path'] is None:
             self.model_Dict['PWGAN'] = PWGAN().to(device)
 
-        if not hp_Dict['Speaker_Embedding']['GE2E']['Checkpoint_Path'] is None:
+        if  hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
             self.model_Dict['Speaker_Embedding'] = Speaker_Embedding(
                 mel_dims= hp_Dict['Sound']['Mel_Dim'],
                 lstm_size= hp_Dict['Speaker_Embedding']['GE2E']['LSTM']['Sizes'],
@@ -139,17 +139,16 @@ class Trainer:
             betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
             eps= hp_Dict['Train']['ADAM']['Epsilon'],
             )
-        self.scheduler = torch.optim.lr_scheduler.StepLR(
-                optimizer= self.optimizer,
-                step_size= hp_Dict['Train']['Learning_Rate']['Decay_Step'],
-                gamma= hp_Dict['Train']['Learning_Rate']['Decay_Rate'],
-                )
+        self.scheduler = Modified_Noam_Scheduler(
+            optimizer= self.optimizer,
+            base= hp_Dict['Train']['Learning_Rate']['Base'],
+            )
 
         if hp_Dict['Use_Mixed_Precision']:
             models = [self.model_Dict['GlowTTS']]
             if not hp_Dict['WaveNet']['Checkpoint_Path'] is None:
                 models.append(self.model_Dict['PWGAN'])
-            if not hp_Dict['Speaker_Embedding']['GE2E']['Checkpoint_Path'] is None:
+            if  hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
                 models.append(self.model_Dict['Speaker_Embedding'])
                 
             models, self.optimizer = amp.initialize(
@@ -160,7 +159,7 @@ class Trainer:
             self.model_Dict['GlowTTS'] = models[0]
             if not hp_Dict['WaveNet']['Checkpoint_Path'] is None:
                 self.model_Dict['PWGAN'] = models[1]
-            if not hp_Dict['Speaker_Embedding']['GE2E']['Checkpoint_Path'] is None:
+            if  hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
                 self.model_Dict['Speaker_Embedding'] = models[-1]
 
         logging.info(self.model_Dict['GlowTTS'])
@@ -239,7 +238,7 @@ class Trainer:
                 self.scalar_Dict['Train'] = {
                     tag: loss / hp_Dict['Train']['Logging_Interval']
                     for tag, loss in self.scalar_Dict['Train'].items()
-                        }
+                    }
                 self.scalar_Dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()
                 self.Write_to_Tensorboard('Train', self.scalar_Dict['Train'])
                 self.scalar_Dict['Train'] = defaultdict(float)
@@ -379,6 +378,22 @@ class Trainer:
             plt.savefig(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG', '{}.PNG'.format(file)).replace('\\', '/'))
             plt.close(new_Figure)
 
+        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
+        for index, (mel, file) in enumerate(zip(
+            mels.cpu().numpy(),
+            files
+            )):
+            np.save(
+                os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
+                mel.T,
+                allow_pickle= False
+                )        
+            np.save(
+                os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), file).replace('\\', '/'),
+                attentions.cpu().numpy()[index],
+                allow_pickle= False
+                )
+
         if 'PWGAN' in self.model_Dict.keys():
             os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
 
@@ -388,7 +403,7 @@ class Trainer:
                 pad= (hp_Dict['WaveNet']['Upsample']['Pad'], hp_Dict['WaveNet']['Upsample']['Pad']),
                 mode= 'replicate'
                 )
-            mels.clamp_(min= -hp_Dict['Sound']['Max_Abs_Mel'], max= hp_Dict['Sound']['Max_Abs_Mel'])            
+            mels.clamp_(min= -hp_Dict['Sound']['Max_Abs_Mel'], max= hp_Dict['Sound']['Max_Abs_Mel'])
 
             for index, (audio, file) in enumerate(zip(
                 self.model_Dict['PWGAN'](noises, mels).cpu().numpy(),
@@ -398,18 +413,6 @@ class Trainer:
                     filename= os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV', '{}.WAV'.format(file)).replace('\\', '/'),
                     data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
                     rate= hp_Dict['Sound']['Sample_Rate']
-                    )
-        else:
-            os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
-
-            for index, (mel, file) in enumerate(zip(
-                mels.cpu().numpy(),
-                files
-                )):
-                np.save(
-                    os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'NPY', file).replace('\\', '/'),
-                    mel.T,
-                    allow_pickle= False
                     )
 
     def Inference_Epoch(self):
@@ -463,7 +466,7 @@ class Trainer:
 
         if not hp_Dict['WaveNet']['Checkpoint_Path'] is None:
             self.PWGAN_Load_Checkpoint()
-        if not hp_Dict['Speaker_Embedding']['GE2E']['Checkpoint_Path'] is None:
+        if  hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
             self.Speaker_Embedding_Load_Checkpoint()
 
     def Save_Checkpoint(self):
@@ -543,6 +546,6 @@ if __name__ == '__main__':
     argParser = argparse.ArgumentParser()
     argParser.add_argument('-s', '--steps', default= 0, type= int)
     args = argParser.parse_args()
-    
+
     new_Trainer = Trainer(steps= args.steps)
     new_Trainer.Train()
