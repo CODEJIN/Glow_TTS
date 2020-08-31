@@ -5,10 +5,13 @@ from random import shuffle
 
 from Pattern_Generator import Pattern_Generate, Text_Filtering
 
-with open('Hyper_Parameter.yaml') as f:
-    hp_Dict = yaml.load(f, Loader=yaml.Loader)
+from Arg_Parser import Recursive_Parse
+hp = Recursive_Parse(yaml.load(
+    open('Hyper_Parameters.yaml', encoding='utf-8'),
+    Loader=yaml.Loader
+    ))
 
-with open(hp_Dict['Token_Path']) as f:
+with open(hp.Token_Path) as f:
     token_Dict = yaml.load(f, Loader=yaml.Loader)
 
 def Text_to_Token(text):
@@ -20,9 +23,9 @@ def Text_to_Token(text):
 def Speaker_Embedding_Stack(mels):
     mels_for_embeddig = []
     for mel in mels:
-        overlap_Length = hp_Dict['Speaker_Embedding']['GE2E']['Inference']['Overlap_Length']
-        slice_Length = hp_Dict['Speaker_Embedding']['GE2E']['Inference']['Slice_Length']
-        required_Length = hp_Dict['Speaker_Embedding']['GE2E']['Inference']['Samples'] * (slice_Length - overlap_Length) + overlap_Length
+        overlap_Length = hp.Speaker_Embedding.GE2E.Inference.Overlap_Length
+        slice_Length = hp.Speaker_Embedding.GE2E.Inference.Slice_Length
+        required_Length = hp.Speaker_Embedding.GE2E.Inference.Samples * (slice_Length - overlap_Length) + overlap_Length
 
         if mel.shape[0] > required_Length:
             offset = np.random.randint(0, mel.shape[0] - required_Length)
@@ -49,17 +52,17 @@ class Train_Dataset(torch.utils.data.Dataset):
         super(Train_Dataset, self).__init__()
 
         metadata_Dict = pickle.load(open(
-            os.path.join(hp_Dict['Train']['Train_Pattern']['Path'], hp_Dict['Train']['Train_Pattern']['Metadata_File']).replace('\\', '/'), 'rb'
+            os.path.join(hp.Train.Train_Pattern.Path, hp.Train.Train_Pattern.Metadata_File).replace('\\', '/'), 'rb'
             ))
         self.file_List = [
             x for x in metadata_Dict['File_List']
             if all([
-                metadata_Dict['Mel_Length_Dict'][x] >= hp_Dict['Train']['Train_Pattern']['Mel_Length']['Min'],
-                metadata_Dict['Mel_Length_Dict'][x] <= hp_Dict['Train']['Train_Pattern']['Mel_Length']['Max'],
-                metadata_Dict['Text_Length_Dict'][x] >= hp_Dict['Train']['Train_Pattern']['Text_Length']['Min'],
-                metadata_Dict['Text_Length_Dict'][x] <= hp_Dict['Train']['Train_Pattern']['Text_Length']['Max']
+                metadata_Dict['Mel_Length_Dict'][x] >= hp.Train.Train_Pattern.Mel_Length.Min,
+                metadata_Dict['Mel_Length_Dict'][x] <= hp.Train.Train_Pattern.Mel_Length.Max,
+                metadata_Dict['Text_Length_Dict'][x] >= hp.Train.Train_Pattern.Text_Length.Min,
+                metadata_Dict['Text_Length_Dict'][x] <= hp.Train.Train_Pattern.Text_Length.Max
                 ])            
-            ] * hp_Dict['Train']['Train_Pattern']['Accumulated_Dataset_Epoch']        
+            ] * hp.Train.Train_Pattern.Accumulated_Dataset_Epoch
             
         self.cache_Dict = {}
 
@@ -68,11 +71,11 @@ class Train_Dataset(torch.utils.data.Dataset):
             return self.cache_Dict[idx]
 
         file = self.file_List[idx]
-        path = os.path.join(hp_Dict['Train']['Train_Pattern']['Path'], file).replace('\\', '/')
+        path = os.path.join(hp.Train.Train_Pattern.Path, file).replace('\\', '/')
         pattern_Dict = pickle.load(open(path, 'rb'))
         pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel'], pattern_Dict['Speaker_ID']
 
-        if hp_Dict['Train']['Use_Pattern_Cache']:
+        if hp.Train.Use_Pattern_Cache:
             self.cache_Dict[path] = pattern
         
         return pattern
@@ -85,15 +88,15 @@ class Dev_Dataset(torch.utils.data.Dataset):
         super(Dev_Dataset, self).__init__()
 
         metadata_Dict = pickle.load(open(
-            os.path.join(hp_Dict['Train']['Eval_Pattern']['Path'], hp_Dict['Train']['Eval_Pattern']['Metadata_File']).replace('\\', '/'), 'rb'
+            os.path.join(hp.Train.Eval_Pattern.Path, hp.Train.Eval_Pattern.Metadata_File).replace('\\', '/'), 'rb'
             ))
         self.file_List = [
             x for x in metadata_Dict['File_List']
             if all([
-                metadata_Dict['Mel_Length_Dict'][x] >= hp_Dict['Train']['Eval_Pattern']['Mel_Length']['Min'],
-                metadata_Dict['Mel_Length_Dict'][x] <= hp_Dict['Train']['Eval_Pattern']['Mel_Length']['Max'],
-                metadata_Dict['Text_Length_Dict'][x] >= hp_Dict['Train']['Eval_Pattern']['Text_Length']['Min'],
-                metadata_Dict['Text_Length_Dict'][x] <= hp_Dict['Train']['Eval_Pattern']['Text_Length']['Max']
+                metadata_Dict['Mel_Length_Dict'][x] >= hp.Train.Eval_Pattern.Mel_Length.Min,
+                metadata_Dict['Mel_Length_Dict'][x] <= hp.Train.Eval_Pattern.Mel_Length.Max,
+                metadata_Dict['Text_Length_Dict'][x] >= hp.Train.Eval_Pattern.Text_Length.Min,
+                metadata_Dict['Text_Length_Dict'][x] <= hp.Train.Eval_Pattern.Text_Length.Max
                 ])            
             ]
             
@@ -104,11 +107,11 @@ class Dev_Dataset(torch.utils.data.Dataset):
             return self.cache_Dict[idx]
 
         file = self.file_List[idx]
-        path = os.path.join(hp_Dict['Train']['Eval_Pattern']['Path'], file).replace('\\', '/')
+        path = os.path.join(hp.Train.Eval_Pattern.Path, file).replace('\\', '/')
         pattern_Dict = pickle.load(open(path, 'rb'))
         pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel'], pattern_Dict['Speaker_ID']
 
-        if hp_Dict['Train']['Use_Pattern_Cache']:
+        if hp.Train.Use_Pattern_Cache:
             self.cache_Dict[path] = pattern
         
         return pattern
@@ -130,15 +133,15 @@ class Inference_Dataset(torch.utils.data.Dataset):
                 continue
 
             path, speaker = None, None
-            if hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
+            if hp.Speaker_Embedding.Type == 'GE2E':
                 path = line[3]
                 if not os.path.exists(path):
                     logging.warn('There is no wav file of line {} in \'{}\'. This line is ignoired.'.format(index + 1, pattern_path))
                     continue
-            elif hp_Dict['Speaker_Embedding']['Type'] == 'LUT':
+            elif hp.Speaker_Embedding.Type == 'LUT':
                 speaker = int(line[3])
-                if speaker >= hp_Dict['Speaker_Embedding']['Num_Speakers']:
-                    logging.warn('The speaker ID index ({}) of line {} is over the limit ({}). This line is ignoired.'.format(speaker, index + 1, hp_Dict['Speaker_Embedding']['Num_Speakers']))
+                if speaker >= hp.Speaker_Embedding.Num_Speakers:
+                    logging.warn('The speaker ID index ({}) of line {} is over the limit ({}). This line is ignoired.'.format(speaker, index + 1, hp.Speaker_Embedding.Num_Speakers))
                     continue
 
             self.pattern_List.append((label, text, length_Scale, path, speaker))
@@ -159,7 +162,7 @@ class Inference_Dataset(torch.utils.data.Dataset):
         
         pattern = token, length_Scale, mel_for_Embedding, label, text, speaker
 
-        if hp_Dict['Train']['Use_Pattern_Cache']:
+        if hp.Train.Use_Pattern_Cache:
             self.cache_Dict[idx] = pattern
  
         return pattern
@@ -177,7 +180,7 @@ class Collater:
         mels_for_Embedding = mels
         
         mels = [
-            mel[:(mel.shape[0] // hp_Dict['Decoder']['Num_Squeeze'] * hp_Dict['Decoder']['Num_Squeeze'])]
+            mel[:(mel.shape[0] // hp.Decoder.Num_Squeeze * hp.Decoder.Num_Squeeze)]
             for mel in mels
             ]
         token_Lengths = [token.shape[0] for token in tokens]
@@ -191,7 +194,7 @@ class Collater:
         mel_Lengths = torch.LongTensor(mel_Lengths)   # [Batch]
         speakers = torch.LongTensor(speakers)
 
-        if hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
+        if hp.Speaker_Embedding.Type == 'GE2E':
             mels_for_Embedding = Speaker_Embedding_Stack(mels_for_Embedding)
             mels_for_Embedding = torch.FloatTensor(mels_for_Embedding).transpose(2, 1)   # [Batch, Mel_dim, Time]
         else:
@@ -209,7 +212,7 @@ class Collater:
             axis= 0
             )
         mels = np.stack(
-            [np.pad(mel, [[0, max_Mel_Length - mel.shape[0]], [0, 0]], constant_values= -hp_Dict['Sound']['Max_Abs_Mel']) for mel in mels],
+            [np.pad(mel, [[0, max_Mel_Length - mel.shape[0]], [0, 0]], constant_values= -hp.Sound.Max_Abs_Mel) for mel in mels],
             axis= 0
             )
 
@@ -230,10 +233,10 @@ class Inference_Collater:
         length_Scales = torch.FloatTensor(length_Scales)
 
         
-        if hp_Dict['Speaker_Embedding']['Type'] == 'GE2E':
+        if hp.Speaker_Embedding.Type == 'GE2E':
             mels_for_Embedding = Speaker_Embedding_Stack(mels_for_Embedding)
             mels_for_Embedding = torch.FloatTensor(mels_for_Embedding).transpose(2, 1)   # [Batch, Mel_dim, Time]
-        elif hp_Dict['Speaker_Embedding']['Type'] == 'LUT':
+        elif hp.Speaker_Embedding.Type == 'LUT':
             speakers = torch.LongTensor(speakers)
         else:
             mels_for_Embedding = None
@@ -258,8 +261,8 @@ if __name__ == '__main__':
         dataset= dataset,
         shuffle= False,
         collate_fn= collater,
-        batch_size= hp_Dict['Train']['Batch_Size'],
-        num_workers= hp_Dict['Train']['Num_Workers'],
+        batch_size= hp.Train.Batch_Size,
+        num_workers= hp.Train.Num_Workers,
         pin_memory= True
         )
 

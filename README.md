@@ -45,7 +45,7 @@
 | X      | | O      | | LibriTTS  | https://openslr.org/60/                         |
 
 # Hyper parameters
-Before proceeding, please set the pattern, inference, and checkpoint paths in 'Hyper_Parameter.yaml' according to your environment.
+Before proceeding, please set the pattern, inference, and checkpoint paths in 'Hyper_Parameters.yaml' according to your environment.
 
 * Sound
     * Setting basic sound parameters.

@@ -3,7 +3,7 @@ Sound:
     Mel_Dim: 80
     Frame_Length: 1024
     Frame_Shift: 256
-    Sample_Rate: 16000
+    Sample_Rate: 24000
     Mel_F_Min: 125
     Mel_F_Max: 7600
     Max_Abs_Mel: 4
@@ -12,6 +12,8 @@ Sound:
     Quantinized_Pitch_Dim: 256
 
 Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut310/glow-tts/tree/master/monotonic_align'.
+
+Mode: 'SE'    #Vanilla, SE, PE, GR
 
 Encoder:
     Channels: 192
@@ -47,24 +49,26 @@ Decoder:
             Kernel_Size: 5
             Dropout_Rate: 0.05
 
-WaveNet:
-    Residual_Channels: 64
-    ResConvGLU:
-        Blocks: 3
-        Stacks_in_Block: 10
-        Gate_Channels: 128
-        Kernel_Size: 3
-        Skip_Channels: 64
-        Dropout_Rate: 0.0
-    Upsample:
-        Scales: [4, 4, 4, 4]
-        Pad: 2
-    Checkpoint_Path: null
-    # Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
+# PE or GRL modes
+Prosody_Encoder:
+    Size: 256
+    Reference_Encoder:
+        Conv:
+            Kernel_Size: [3, 3, 3, 3, 3, 3]
+            Channels: [32, 32, 64, 64, 128, 128]
+            Strides: [2, 2, 2, 2, 2, 2]
+        GRU:
+            Size: 128
+            Stacks: 1
+    Style_Token:
+        Num_Tokens: 10
+        Size: 256
+        Attention_Head: 4
 
+# SE or GR modes
 Speaker_Embedding:
-    Type: 'GE2E'    #null, LUT, GE2E
-    Num_Speakers: 2457  # Only lut uses.
+    Type: 'GE2E'    #LUT, GE2E
+    Num_Speakers: 2457  # If using SE mode, only lut uses. If using GR mode, always used.
     Embedding_Size: 256
     GE2E:
         LSTM:
@@ -76,11 +80,11 @@ Speaker_Embedding:
             Overlap_Length: 32
         Checkpoint_Path: './Speaker_Embedding/Example_Results/Checkpoint/S_100000.pkl'
 
-Token_Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Token.yaml'
+Token_Path: 'C:/Pattern/24K.Pattern.LJVCTKLibri/Token.yaml'
 Train:
     Use_Pattern_Cache: true
     Train_Pattern:
-        Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Train'
+        Path: 'C:/Pattern/24K.Pattern.LJVCTKLibri/Train'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
@@ -90,7 +94,7 @@ Train:
             Max: 150
         Accumulated_Dataset_Epoch: 1   # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
-        Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Eval'
+        Path: 'C:/Pattern/24K.Pattern.LJVCTKLibri/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50

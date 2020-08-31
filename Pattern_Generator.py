@@ -9,8 +9,11 @@ from tqdm import tqdm
 from Audio import Audio_Prep, Mel_Generate
 from yin import pitch_calc
 
-with open('Hyper_Parameter.yaml') as f:
-    hp_Dict = yaml.load(f, Loader=yaml.Loader)
+from Arg_Parser import Recursive_Parse
+hp = Recursive_Parse(yaml.load(
+    open('Hyper_Parameters.yaml', encoding='utf-8'),
+    Loader=yaml.Loader
+    ))
 
 using_Extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
 regex_Checker = re.compile('[A-Z,.?!\'\-\s]+')
@@ -38,33 +41,33 @@ def Text_Filtering(text):
 def Pitch_Generate(audio):
     pitch = pitch_calc(
         sig= audio,
-        sr= hp_Dict['Sound']['Sample_Rate'],
-        w_len= hp_Dict['Sound']['Frame_Length'],
-        w_step= hp_Dict['Sound']['Frame_Shift'],
-        confidence_threshold= hp_Dict['Sound']['Confidence_Threshold'],
-        gaussian_smoothing_sigma = hp_Dict['Sound']['Gaussian_Smoothing_Sigma']
+        sr= hp.Sound.Sample_Rate,
+        w_len= hp.Sound.Frame_Length,
+        w_step= hp.Sound.Frame_Shift,
+        confidence_threshold= hp.Sound.Confidence_Threshold,
+        gaussian_smoothing_sigma = hp.Sound.Gaussian_Smoothing_Sigma
         )
     return (pitch - np.min(pitch)) / (np.max(pitch) - np.min(pitch) + 1e-7)
 
 def Pattern_Generate(path, top_db= 60):
-    audio = Audio_Prep(path, hp_Dict['Sound']['Sample_Rate'], top_db)
+    audio = Audio_Prep(path, hp.Sound.Sample_Rate, top_db)
     mel = Mel_Generate(
         audio= audio,
-        sample_rate= hp_Dict['Sound']['Sample_Rate'],
-        num_frequency= hp_Dict['Sound']['Spectrogram_Dim'],
-        num_mel= hp_Dict['Sound']['Mel_Dim'],
-        window_length= hp_Dict['Sound']['Frame_Length'],
-        hop_length= hp_Dict['Sound']['Frame_Shift'],
-        mel_fmin= hp_Dict['Sound']['Mel_F_Min'],
-        mel_fmax= hp_Dict['Sound']['Mel_F_Max'],
-        max_abs_value= hp_Dict['Sound']['Max_Abs_Mel']
+        sample_rate= hp.Sound.Sample_Rate,
+        num_frequency= hp.Sound.Spectrogram_Dim,
+        num_mel= hp.Sound.Mel_Dim,
+        window_length= hp.Sound.Frame_Length,
+        hop_length= hp.Sound.Frame_Shift,
+        mel_fmin= hp.Sound.Mel_F_Min,
+        mel_fmax= hp.Sound.Mel_F_Max,
+        max_abs_value= hp.Sound.Max_Abs_Mel
         )
     pitch = Pitch_Generate(audio)
 
     return audio, mel, pitch
 
 def Pattern_File_Generate(path, speaker_ID, speaker, dataset, text= None, tag='', eval= False):
-    pattern_Path = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Path']
+    pattern_Path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
 
     try:
         audio, mel, pitch = Pattern_Generate(path, top_DB_Dict[dataset])
@@ -164,7 +167,7 @@ def CMUA_Info_Load(path, use_text= False):
             for line in open(os.path.join(root, 'txt.done.data'), 'r').readlines():
                 file, text, _ = line.strip().split('"')
                 file = file.strip().split(' ')[1]
-                path = os.path.join(root.replace('etc', 'wav'), '{}.wav'.format(file)).replace('\\', '/')                
+                path = os.path.join(root.replace('etc', 'wav'), '{}.wav'.format(file)).replace('\\', '/')
                 text = Text_Filtering(text)
                 if not text is None:
                     text_Dict[path] = text
@@ -253,16 +256,16 @@ def Split_Eval(paths, eval_ratio= 0.001):
     return paths[index:], paths[:index]
 
 def Metadata_Generate(eval= False, use_text= False):
-    pattern_Path = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Path']
-    metadata_File = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Metadata_File']
+    pattern_Path = hp.Train.Eval_Pattern.Path if eval else hp.Train_Pattern.Path
+    metadata_File = hp.Train.Eval_Pattern.Metadata_File if eval else hp.Train_Pattern.Metadata_File
 
     new_Metadata_Dict = {
-        'Spectrogram_Dim': hp_Dict['Sound']['Spectrogram_Dim'],
-        'Mel_Dim': hp_Dict['Sound']['Mel_Dim'],
-        'Frame_Shift': hp_Dict['Sound']['Frame_Shift'],
-        'Frame_Length': hp_Dict['Sound']['Frame_Length'],
-        'Sample_Rate': hp_Dict['Sound']['Sample_Rate'],
-        'Max_Abs_Mel': hp_Dict['Sound']['Max_Abs_Mel'],
+        'Spectrogram_Dim': hp.Sound.Spectrogram_Dim,
+        'Mel_Dim': hp.Sound.Mel_Dim,
+        'Frame_Shift': hp.Sound.Frame_Shift,
+        'Frame_Length': hp.Sound.Frame_Length,
+        'Sample_Rate': hp.Sound.Sample_Rate,
+        'Max_Abs_Mel': hp.Sound.Max_Abs_Mel,
         'File_List': [],
         'Audio_Length_Dict': {},
         'Mel_Length_Dict': {},
@@ -308,16 +311,16 @@ def Token_Dict_Generate(text_Dict):
     for text in text_Dict.values():
         tokens = tokens.union(set(text))
 
-    os.makedirs(os.path.dirname(hp_Dict['Token_Path']), exist_ok= True)
+    os.makedirs(os.path.dirname(hp.Token_Path), exist_ok= True)
     #I don't use yaml.dump in this case to sort clearly.
     yaml.dump(
         {token: index for index, token in enumerate(['<S>', '<E>'] + sorted(tokens))},
-        open(hp_Dict['Token_Path'], 'w')
+        open(hp.Token_Path, 'w')
         )
     
     # #I don't use yaml.dump in this case to sort clearly.
-    # os.makedirs(os.path.dirname(hp_Dict['Token_Path']), exist_ok= True)
-    # open(hp_Dict['Token_Path'], 'w').write('\n'.join([
+    # os.makedirs(os.path.dirname(hp.Token_Path), exist_ok= True)
+    # open(hp.Token_Path, 'w').write('\n'.join([
     #     '\'{}\': {}'.format(token, index)
     #     for index, token in enumerate(['<S>', '<E>'] + sorted(tokens))
     #     ]))
