@@ -339,7 +339,7 @@ class Trainer:
             plt.title('Mel    Label: {}    Text: {}    Length scale: {:.3f}'.format(label, text if len(text) < 90 else text[:90] + '…', length_Scale))
             plt.colorbar()
             plt.subplot2grid((3, 1), (1, 0), rowspan= 2)
-            plt.imshow(attention[:len(text) + 2], aspect='auto', origin='lower')
+            plt.imshow(attention[:len(text) + 2], aspect='auto', origin='lower', interpolation= 'none')
             plt.title('Attention    Label: {}    Text: {}    Length scale: {:.3f}'.format(label, text if len(text) < 90 else text[:90] + '…', length_Scale))
             plt.yticks(
                 range(len(text) + 2),
