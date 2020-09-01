@@ -9,7 +9,8 @@ Sound:
     Max_Abs_Mel: 4
     Confidence_Threshold: 0.6
     Gaussian_Smoothing_Sigma: 0.0
-    Quantinized_Pitch_Dim: 256
+    Pitch_Min: 100.0
+    Pitch_Max: 500.0
 
 Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut310/glow-tts/tree/master/monotonic_align'.
 
@@ -50,7 +51,7 @@ Decoder:
 
 # SE or GR modes
 Speaker_Embedding:
-    Type: 'GE2E'    #LUT, GE2E
+    Type: 'LUT'    #LUT, GE2E
     Num_Speakers: 8  # If using SE mode, only lut uses. If using GR mode, always used.
     Embedding_Size: 256
     GE2E:
@@ -78,6 +79,9 @@ Prosody_Encoder:
         Num_Tokens: 10
         Size: 256
         Attention_Head: 4
+
+Speaker_Classifier_GR:
+    Channels: [256]
 
 Token_Path: 'C:/Pattern/24K.Pattern.LJCMUA/Token.yaml'
 Train:
@@ -118,7 +122,7 @@ Train:
     Logging_Interval: 100
     Evaluation_Interval: 1000
     Inference_Interval: 1000
-    Initial_Inference: true
+    Initial_Inference: false
     Inference_Pattern_File_in_Train: 'Inference_Text_for_PE.txt'
 
 Inference_Batch_Size: 16 #null

@@ -107,7 +107,7 @@ class Trainer:
             )
         self.dataLoader_Dict['Dev'] = torch.utils.data.DataLoader(
             dataset= dev_Dataset,
-            shuffle= False,
+            shuffle= True,
             collate_fn= collater,
             batch_size= hp.Train.Batch_Size,
             num_workers= hp.Train.Num_Workers,
@@ -137,7 +137,8 @@ class Trainer:
 
         self.criterion_Dict = {
             'MSE': torch.nn.MSELoss().to(device),
-            'MLE': MLE_Loss().to(device)
+            'MLE': MLE_Loss().to(device),
+            'CE': torch.nn.CrossEntropyLoss().to(device)
             }
         self.optimizer = RAdam(
             params= self.model_Dict['GlowTTS'].parameters(),
@@ -160,7 +161,7 @@ class Trainer:
         logging.info(self.model_Dict['GlowTTS'])
 
 
-    def Train_Step(self, tokens, token_lengths, mels, mel_lengths, speakers, mels_for_ge2e):
+    def Train_Step(self, tokens, token_lengths, mels, mel_lengths, speakers, mels_for_ge2e, pitches):
         loss_Dict = {}
 
         tokens = tokens.to(device)
@@ -169,14 +170,16 @@ class Trainer:
         mel_lengths = mel_lengths.to(device)
         speakers = speakers.to(device)
         mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
 
-        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
             token_lengths= token_lengths,
             mels= mels,
             mel_lengths= mel_lengths,
             speakers= speakers,
-            mels_for_ge2e= mels_for_ge2e
+            mels_for_ge2e= mels_for_ge2e,
+            pitches= pitches
             )
 
         loss_Dict['MLE'] = self.criterion_Dict['MLE'](
@@ -187,18 +190,23 @@ class Trainer:
             lengths= mel_lengths
             )
         loss_Dict['Length'] = self.criterion_Dict['MSE'](log_Durations, log_Duration_Targets)
-        loss_Dict['Loss'] = loss_Dict['MLE'] + loss_Dict['Length']
+        loss_Dict['Total'] = loss_Dict['MLE'] + loss_Dict['Length']
+
+        loss = loss_Dict['Total']
+        if not classified_Speakers is None:
+            loss_Dict['Speaker'] = self.criterion_Dict['CE'](classified_Speakers, speakers)
+            loss += loss_Dict['Speaker']
 
         self.optimizer.zero_grad()
         if hp.Use_Mixed_Precision:
-            with amp.scale_loss(loss_Dict['Loss'], self.optimizer) as scaled_loss:
+            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()            
             torch.nn.utils.clip_grad_norm_(
                 parameters= amp.master_params(self.optimizer),
                 max_norm= hp.Train.Gradient_Norm
                 )
         else:
-            loss_Dict['Loss'].backward()
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 parameters= self.model_Dict['GlowTTS'].parameters(),
                 max_norm= hp.Train.Gradient_Norm
@@ -212,8 +220,8 @@ class Trainer:
             self.scalar_Dict['Train']['Loss/{}'.format(tag)] += loss
 
     def Train_Epoch(self):
-        for tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E in self.dataLoader_Dict['Train']:
-            self.Train_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E)
+        for tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E, pitches in self.dataLoader_Dict['Train']:
+            self.Train_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E, pitches)
             
             if self.steps % hp.Train.Checkpoint_Save_Interval == 0:
                 self.Save_Checkpoint()
@@ -239,7 +247,7 @@ class Trainer:
         self.epochs += hp.Train.Train_Pattern.Accumulated_Dataset_Epoch
 
     @torch.no_grad()
-    def Evaluation_Step(self, tokens, token_lengths, mels, mel_lengths, speakers, mels_for_ge2e):
+    def Evaluation_Step(self, tokens, token_lengths, mels, mel_lengths, speakers, mels_for_ge2e, pitches):
         loss_Dict = {}
 
         tokens = tokens.to(device)
@@ -248,14 +256,16 @@ class Trainer:
         mel_lengths = mel_lengths.to(device)
         speakers = speakers.to(device)
         mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
 
-        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets = self.model_Dict['GlowTTS'](
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
             token_lengths= token_lengths,
             mels= mels,
             mel_lengths= mel_lengths,
             speakers= speakers,
-            mels_for_ge2e= mels_for_ge2e
+            mels_for_ge2e= mels_for_ge2e,
+            pitches= pitches
             )
 
         loss_Dict['MLE'] = self.criterion_Dict['MLE'](
@@ -266,10 +276,28 @@ class Trainer:
             lengths= mel_lengths
             )
         loss_Dict['Length'] = self.criterion_Dict['MSE'](log_Durations, log_Duration_Targets)
-        loss_Dict['Loss'] = loss_Dict['MLE'] + loss_Dict['Length']
+        loss_Dict['Total'] = loss_Dict['MLE'] + loss_Dict['Length']
+        if not classified_Speakers is None:
+            loss_Dict['Speaker'] = self.criterion_Dict['CE'](classified_Speakers, speakers)
 
         for tag, loss in loss_Dict.items():
             self.scalar_Dict['Evaluation']['Loss/{}'.format(tag)] += loss
+
+
+        # For tensorboard images
+        mels, attentions = self.model_Dict['GlowTTS'].inference(
+            tokens= tokens,
+            token_lengths= token_lengths,
+            mels_for_prosody= mels,
+            mel_lengths_for_prosody= mel_lengths,
+            speakers= speakers,
+            mels_for_ge2e= mels_for_ge2e,
+            pitches= pitches,
+            pitch_lengths= mel_lengths,
+            length_scale= torch.FloatTensor([1.0]).to(device)
+            )
+
+        return mels, attentions, classified_Speakers
     
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
@@ -277,12 +305,12 @@ class Trainer:
         for model in self.model_Dict.values():
             model.eval()
 
-        for step, (tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E) in tqdm(
+        for step, (tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E, pitches) in tqdm(
             enumerate(self.dataLoader_Dict['Dev'], 1),
             desc='[Evaluation]',
             total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp.Train.Batch_Size)
             ):
-            self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E)
+            mel_Predictions, attentions, classified_Speakers = self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E, pitches)
 
         self.scalar_Dict['Evaluation'] = {
             tag: loss / step
@@ -292,18 +320,31 @@ class Trainer:
         self.writer_Dict['Evaluation'].add_histogram_model(self.model_Dict['GlowTTS'], self.steps, delete_keywords=['layer_Dict', 'layer', 'GE2E'])
         self.scalar_Dict['Evaluation'] = defaultdict(float)
 
+        image_Dict = {
+            'Mel/Target': (mels[-1].cpu().numpy(), None),
+            'Mel/Prediction': (mel_Predictions[-1].cpu().numpy(), None),
+            'Attention': (attentions[-1].cpu().numpy(), None)
+            }
+        if not classified_Speakers is None:
+            image_Dict.update({
+                'Speaker/Original': (torch.nn.functional.one_hot(speakers, hp.Speaker_Embedding.Num_Speakers).cpu().numpy(), None),
+                'Speaker/Predicted': (torch.softmax(classified_Speakers, dim= -1).cpu().numpy(), None),
+                })
+        self.writer_Dict['Evaluation'].add_image_dict(image_Dict, self.steps)
+
         for model in self.model_Dict.values():
             model.train()
 
 
     @torch.no_grad()
-    def Inference_Step(self, tokens, token_lengths, mels_for_prosody, mel_lengths_for_prosody, speakers, mels_for_ge2e, length_scales, labels, texts, start_index= 0, tag_step= False, tag_index= False):
+    def Inference_Step(self, tokens, token_lengths, mels_for_prosody, mel_lengths_for_prosody, speakers, mels_for_ge2e, pitches, pitch_lengths, length_scales, labels, texts, start_index= 0, tag_step= False, tag_index= False):
         tokens = tokens.to(device)
         token_lengths = token_lengths.to(device)
         mels_for_prosody = mels_for_prosody.to(device)
         mel_lengths_for_prosody = mel_lengths_for_prosody.to(device)
         speakers = speakers.to(device)
         mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
         length_scales = length_scales.to(device)
 
         mels, attentions = self.model_Dict['GlowTTS'].inference(
@@ -313,6 +354,8 @@ class Trainer:
             mel_lengths_for_prosody= mel_lengths_for_prosody,
             speakers= speakers,
             mels_for_ge2e= mels_for_ge2e,
+            pitches= pitches,
+            pitch_lengths= pitch_lengths,
             length_scale= length_scales
             )
 
@@ -397,12 +440,12 @@ class Trainer:
         for model in self.model_Dict.values():
             model.eval()
 
-        for step, (tokens, token_Lengths, mels_for_Prosody, mel_Lengths_for_Prosody, speakers, mels_for_GE2E, length_Scales, labels, texts) in tqdm(
+        for step, (tokens, token_Lengths, mels_for_Prosody, mel_Lengths_for_Prosody, speakers, mels_for_GE2E, pitches, pitch_Lengths, length_Scales, labels, texts) in tqdm(
             enumerate(self.dataLoader_Dict['Inference']),
             desc='[Inference]',
             total= math.ceil(len(self.dataLoader_Dict['Inference'].dataset) / (hp.Inference_Batch_Size or hp.Train.Batch_Size))
             ):
-            self.Inference_Step(tokens, token_Lengths, mels_for_Prosody, mel_Lengths_for_Prosody, speakers, mels_for_GE2E, length_Scales, labels, texts, start_index= step * (hp.Inference_Batch_Size or hp.Train.Batch_Size))
+            self.Inference_Step(tokens, token_Lengths, mels_for_Prosody, mel_Lengths_for_Prosody, speakers, mels_for_GE2E, pitches, pitch_Lengths, length_Scales, labels, texts, start_index= step * (hp.Inference_Batch_Size or hp.Train.Batch_Size))
 
         for model in self.model_Dict.values():
             model.train()

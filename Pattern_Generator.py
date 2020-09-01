@@ -44,6 +44,8 @@ def Pitch_Generate(audio):
         sr= hp.Sound.Sample_Rate,
         w_len= hp.Sound.Frame_Length,
         w_step= hp.Sound.Frame_Shift,
+        f0_min= hp.Sound.Pitch_Min,
+        f0_max= hp.Sound.Pitch_Max,
         confidence_threshold= hp.Sound.Confidence_Threshold,
         gaussian_smoothing_sigma = hp.Sound.Gaussian_Smoothing_Sigma
         )

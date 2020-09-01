@@ -41,6 +41,7 @@ class GlowTTS(torch.nn.Module):
 
         if hp.Mode.upper() == 'GR':
             self.layer_Dict['Speaker_Classifier_GR'] = Speaker_Classifier_GR()
+            self.layer_Dict['Pitch_Interpolater'] = Pitch_Interpolater()
         
         self.layer_Dict['Encoder'] = Encoder()
         self.layer_Dict['Decoder'] = Decoder()
@@ -53,7 +54,8 @@ class GlowTTS(torch.nn.Module):
         mels,
         mel_lengths,
         speakers,
-        mels_for_ge2e
+        mels_for_ge2e,
+        pitches
         ):
         '''
         For train.
@@ -64,6 +66,7 @@ class GlowTTS(torch.nn.Module):
         mel_lengths: [Batch]    # Length of target/prosody encoder
         speakers: [Batch]   # Indice of speaker.
         mels_for_ge2e: [Batch * Samples, Mel_d, Mel_SE_t]    # Input of speaker embedding
+        pitches: [Batch, Mel_t] # Input of pitch quantinizer (Mel_t == Pitch_t)
         '''
         assert all(mel_lengths % hp.Decoder.Num_Squeeze == 0), 'Mel lengths must be diviable by Num_Squeeze.'
         
@@ -80,13 +83,23 @@ class GlowTTS(torch.nn.Module):
         else:
             prosodies = None
 
+        if 'Pitch_Quantinizer' in self.layer_Dict.keys():
+            pitches = self.layer_Dict['Pitch_Quantinizer'](pitches)
+        else:
+            pitches = None
+
+        if 'Speaker_Classifier_GR' in self.layer_Dict.keys():
+            classified_Speakers = self.layer_Dict['Speaker_Classifier_GR'](prosodies)
+        else:
+            classified_Speakers = None
+
         if hp.Device != '-1': torch.cuda.synchronize()
 
         token_Masks = self.Mask_Generate(token_lengths)
         mel_Masks = self.Mask_Generate(mel_lengths)
 
         mean, log_Std, log_Durations, token_Masks = self.layer_Dict['Encoder'](tokens, token_Masks, speakers, prosodies)
-        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks, speakers, prosodies)
+        z, log_Dets = self.layer_Dict['Decoder'](mels, mel_Masks, speakers, prosodies, pitches)
         
         attention_Masks = torch.unsqueeze(token_Masks, -1) * torch.unsqueeze(mel_Masks, 2)
         attention_Masks = attention_Masks.squeeze(1)
@@ -112,7 +125,7 @@ class GlowTTS(torch.nn.Module):
 
         if hp.Device != '-1': torch.cuda.synchronize()
 
-        return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets
+        return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, classified_Speakers
 
     def inference(
         self,
@@ -122,6 +135,8 @@ class GlowTTS(torch.nn.Module):
         mel_lengths_for_prosody,
         speakers,
         mels_for_ge2e,
+        pitches,
+        pitch_lengths,
         noise_scale= 1.0,
         length_scale= 1.0
         ):
@@ -164,6 +179,7 @@ class GlowTTS(torch.nn.Module):
         attention_Masks = torch.unsqueeze(token_Masks, -1) * torch.unsqueeze(mel_Masks, 2)
         attention_Masks = attention_Masks.squeeze(1)
 
+
         attentions = self.Path_Generate(durations, attention_Masks) # [Batch, Token_t, Mel_t]
 
         if hp.Device != '-1': torch.cuda.synchronize()
@@ -176,7 +192,13 @@ class GlowTTS(torch.nn.Module):
 
         z = (mel_Mean + torch.exp(mel_Log_Std) * noises) * mel_Masks
         
-        mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, speakers, prosodies, reverse= True)
+
+        if 'Pitch_Interpolater' in self.layer_Dict.keys():
+            pitches = self.layer_Dict['Pitch_Interpolater'](pitches, pitch_lengths, mel_Lengths)
+        else:
+            pitches = None
+
+        mels, _ = self.layer_Dict['Decoder'](z, mel_Masks, speakers, prosodies, pitches, reverse= True)
 
         if hp.Device != '-1': torch.cuda.synchronize()
 
@@ -261,15 +283,17 @@ class Decoder(torch.nn.Module):
         for index in range(hp.Decoder.Stack):
             self.layer_Dict['Flows'].append(AIA())
 
-    def forward(self, x, mask, speakers= None, prosodies= None, reverse= False):
-        x, mask = self.layer_Dict['Squeeze'](x, mask)
+    def forward(self, x, mask, speakers= None, prosodies= None, pitches= None, reverse= False):
+        x, squeezed_Mask = self.layer_Dict['Squeeze'](x, mask)
+        if not pitches is None:
+            pitches, _ = self.layer_Dict['Squeeze'](pitches, mask)
 
         log_Dets = []
         for flow in  reversed(self.layer_Dict['Flows']) if reverse else self.layer_Dict['Flows']:
-            x, logdet = flow(x, mask, speakers, prosodies, reverse= reverse)
+            x, logdet = flow(x, squeezed_Mask, speakers, prosodies, pitches, reverse= reverse)
             log_Dets.extend(logdet)
 
-        x, mask = self.layer_Dict['Unsqueeze'](x, mask)
+        x, mask = self.layer_Dict['Unsqueeze'](x, squeezed_Mask)
 
         return x, (None if reverse else torch.sum(torch.stack(log_Dets), dim= 0))
 
@@ -349,6 +373,27 @@ class Prosody_Encoder(torch.nn.Module):
         
         return x.squeeze(2)
 
+class Pitch_Interpolater(torch.nn.Module):
+    def forward(self, pitches, base_lengths, new_lengths):
+        new_Max_Length = torch.max(new_lengths)
+
+        pitches = [
+            torch.nn.functional.interpolate(
+                input= pitch[:base_Length].unsqueeze(0).unsqueeze(0),
+                size= new_Length,
+                mode= 'linear',
+                align_corners= True
+                ).squeeze(0).squeeze(0)
+            for pitch, base_Length, new_Length in zip(pitches, base_lengths, new_lengths)
+            ]
+        pitches = torch.stack([
+            torch.nn.functional.pad(pitch, [0, new_Max_Length - pitch.size(0)])
+            for pitch in pitches
+            ])
+        
+        return pitches.unsqueeze(1) #[Batch, 1, Pitch_t]
+
+
 class Speaker_Classifier_GR(torch.nn.Module):
     def __init__(self):
         super(Speaker_Classifier_GR, self).__init__()
@@ -377,7 +422,7 @@ class Speaker_Classifier_GR(torch.nn.Module):
                 ))
 
     def forward(self, x):
-        return self.layer(x)
+        return self.layer(x.unsqueeze(2)).squeeze(2)
 
 
 
@@ -602,10 +647,10 @@ class AIA(torch.nn.Module):
         self.layers.append(Invertible_1x1_Conv())
         self.layers.append(Affine_Coupling_Layer())
 
-    def forward(self, x, mask, speakers, prosodies, reverse= False):
+    def forward(self, x, mask, speakers, prosodies, pitches, reverse= False):
         logdets = []
         for layer in (reversed(self.layers) if reverse else self.layers):
-            x, logdet = layer(x, mask, speakers= speakers, prosodies= prosodies, reverse= reverse)
+            x, logdet = layer(x, mask, speakers= speakers, prosodies= prosodies, pitches= pitches, reverse= reverse)
             logdets.append(logdet)
         
         return x, logdets
@@ -720,7 +765,7 @@ class Affine_Coupling_Layer(torch.nn.Module):
             w_init_gain= 'zero'
             )
 
-    def forward(self, x, mask, speakers= None, prosodies= None, reverse= False):
+    def forward(self, x, mask, speakers= None, prosodies= None, pitches= None, reverse= False):
         batch, channels, time = x.size()
         if mask is None:
             mask = 1
@@ -732,7 +777,7 @@ class Affine_Coupling_Layer(torch.nn.Module):
             )
         
         x = self.layer_Dict['Start'](x_a) * mask
-        x = self.layer_Dict['WaveNet'](x, mask, speakers, prosodies)
+        x = self.layer_Dict['WaveNet'](x, mask, speakers, prosodies, pitches)
         outs = self.layer_Dict['End'](x)
 
         mean, logs = torch.split(
@@ -786,12 +831,19 @@ class WaveNet(torch.nn.Module):
                     kernel_size= 1,
                     w_init_gain= ['tanh', 'sigmoid']
                     ))
+            if hp.Mode.upper() == 'GR':
+                self.layer_Dict['Pitch_{}'.format(index)] = torch.nn.utils.weight_norm(Conv1d(
+                    in_channels= hp.Decoder.Num_Squeeze,
+                    out_channels= hp.Decoder.Affine_Coupling.Calc_Channels * 2,
+                    kernel_size= 1,
+                    w_init_gain= ['tanh', 'sigmoid']
+                    ))
 
         self.layer_Dict['Dropout'] = torch.nn.Dropout(
             p= hp.Decoder.Affine_Coupling.WaveNet.Dropout_Rate
             )
 
-    def forward(self, x, mask, speakers= None, prosodies= None):
+    def forward(self, x, mask, speakers= None, prosodies= None, pitches= None):
         output = torch.zeros_like(x)
         for index in range(hp.Decoder.Affine_Coupling.WaveNet.Num_Layers):
             ins = self.layer_Dict['In_{}'.format(index)](x)     # [Batch, Channels, Time]
@@ -800,6 +852,9 @@ class WaveNet(torch.nn.Module):
                 ins += self.layer_Dict['Speaker_{}'.format(index)](speakers.unsqueeze(2))     # [Batch, Channels, Time] + [Batch, Channels, 1] -> [Batch, Channels, Time]
             if not prosodies is None:
                 ins += self.layer_Dict['Prosody_{}'.format(index)](prosodies.unsqueeze(2))     # [Batch, Channels, Time] + [Batch, Channels, 1] -> [Batch, Channels, Time]
+
+            if not pitches is None:
+                ins += self.layer_Dict['Pitch_{}'.format(index)](pitches)     # [Batch, Channels, Time] + [Batch, Channels, Time] -> [Batch, Channels, Time]
             acts = self.fused_gate(ins)
             res_Skips = self.layer_Dict['Res_Skip_{}'.format(index)](acts)
             if index < hp.Decoder.Affine_Coupling.WaveNet.Num_Layers - 1:
