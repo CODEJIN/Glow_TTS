@@ -357,7 +357,7 @@ class Speaker_Classifier_GR(torch.nn.Module):
         self.layer.add_module('GRL', GRL(weight= hp.Train.Adversarial_Speaker_Weight))
 
         previous_Channels = hp.Prosody_Encoder.Size
-        for index, channels in enumerate(hp.Speaker_Classifier_GR.Channels)
+        for index, channels in enumerate(hp.Speaker_Classifier_GR.Channels):
             self.layer.add_module('Hidden_{}'.format(index), Conv1d(
                 in_channels= previous_Channels,
                 out_channels= channels,

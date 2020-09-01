@@ -352,8 +352,8 @@ class Trainer:
             plt.close(new_Figure)
 
         os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY').replace('\\', '/'), exist_ok= True)
-        os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'Mel').replace('\\', '/'), exist_ok= True)
-        os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'Attention').replace('\\', '/'), exist_ok= True)
+        os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', 'Mel').replace('\\', '/'), exist_ok= True)
+        os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', 'Attention').replace('\\', '/'), exist_ok= True)
         
         for index, (mel, file) in enumerate(zip(
             mels.cpu().numpy(),
