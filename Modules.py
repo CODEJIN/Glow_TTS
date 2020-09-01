@@ -3,6 +3,7 @@ import numpy as np
 import yaml, logging, math
 
 from RPR_MHA import RPR_Multihead_Attention
+from Gradient_Reversal_Layer import GRL
 from Speaker_Embedding.Modules import Encoder as GE2E, Normalize as GE2E_Normalize
 
 from Arg_Parser import Recursive_Parse
@@ -37,6 +38,9 @@ class GlowTTS(torch.nn.Module):
         
         if hp.Mode.upper() in ['PE', 'GR']:
             self.layer_Dict['Prosody_Encoder'] = Prosody_Encoder()
+
+        if hp.Mode.upper() == 'GR':
+            self.layer_Dict['Speaker_Classifier_GR'] = Speaker_Classifier_GR()
         
         self.layer_Dict['Encoder'] = Encoder()
         self.layer_Dict['Decoder'] = Decoder()
@@ -344,6 +348,37 @@ class Prosody_Encoder(torch.nn.Module):
             )
         
         return x.squeeze(2)
+
+class Speaker_Classifier_GR(torch.nn.Module):
+    def __init__(self):
+        super(Speaker_Classifier_GR, self).__init__()
+
+        self.layer = torch.nn.Sequential()
+        self.layer.add_module('GRL', GRL(weight= hp.Train.Adversarial_Speaker_Weight))
+
+        previous_Channels = hp.Prosody_Encoder.Size
+        for index, channels in enumerate(hp.Speaker_Classifier_GR.Channels)
+            self.layer.add_module('Hidden_{}'.format(index), Conv1d(
+                in_channels= previous_Channels,
+                out_channels= channels,
+                kernel_size= 1,
+                bias= True,
+                w_init_gain= 'relu'
+                ))
+            self.layer.add_module('ReLU_{}'.format(index), torch.nn.ReLU())
+            previous_Channels = channels
+        
+        self.layer.add_module('Output_{}'.format(index), Conv1d(
+                in_channels= previous_Channels,
+                out_channels= hp.Speaker_Embedding.Num_Speakers,
+                kernel_size= 1,
+                bias= True,
+                w_init_gain= 'linear'
+                ))
+
+    def forward(self, x):
+        return self.layer(x)
+
 
 
 class Prenet(torch.nn.Module):

@@ -102,6 +102,7 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 4
+    Adversarial_Speaker_Weight: 0.0005
     Batch_Size: 128
     Learning_Rate:
         Initial: 1.0e-3
