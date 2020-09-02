@@ -172,7 +172,7 @@ class Trainer:
         mels_for_ge2e = mels_for_ge2e.to(device)
         pitches = pitches.to(device)
 
-        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, classified_Speakers = self.model_Dict['GlowTTS'](
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, _, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
             token_lengths= token_lengths,
             mels= mels,
@@ -258,7 +258,7 @@ class Trainer:
         mels_for_ge2e = mels_for_ge2e.to(device)
         pitches = pitches.to(device)
 
-        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, classified_Speakers = self.model_Dict['GlowTTS'](
+        z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, attentions_from_Train, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
             token_lengths= token_lengths,
             mels= mels,
@@ -285,7 +285,7 @@ class Trainer:
 
 
         # For tensorboard images
-        mels, attentions = self.model_Dict['GlowTTS'].inference(
+        mels, attentions_from_Inference = self.model_Dict['GlowTTS'].inference(
             tokens= tokens,
             token_lengths= token_lengths,
             mels_for_prosody= mels,
@@ -297,7 +297,7 @@ class Trainer:
             length_scale= torch.FloatTensor([1.0]).to(device)
             )
 
-        return mels, attentions, classified_Speakers
+        return mels, attentions_from_Train, attentions_from_Inference, classified_Speakers
     
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
@@ -310,7 +310,7 @@ class Trainer:
             desc='[Evaluation]',
             total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp.Train.Batch_Size)
             ):
-            mel_Predictions, attentions, classified_Speakers = self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E, pitches)
+            mel_Predictions, attentions_from_Train, attentions_from_Inference, classified_Speakers = self.Evaluation_Step(tokens, token_Lengths, mels, mel_Lengths, speakers, mels_for_GE2E, pitches)
 
         self.scalar_Dict['Evaluation'] = {
             tag: loss / step
@@ -323,7 +323,8 @@ class Trainer:
         image_Dict = {
             'Mel/Target': (mels[-1].cpu().numpy(), None),
             'Mel/Prediction': (mel_Predictions[-1].cpu().numpy(), None),
-            'Attention': (attentions[-1].cpu().numpy(), None)
+            'Attention/From_Train': (attentions_from_Train[-1].cpu().numpy(), None),
+            'Attention/From_Inference': (attentions_from_Inference[-1].cpu().numpy(), None)
             }
         if not classified_Speakers is None:
             image_Dict.update({

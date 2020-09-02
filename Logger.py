@@ -25,7 +25,7 @@ class Logger(SummaryWriter):
                 if not limit is None:
                     plt.ylim(*limit)
             elif data.ndim == 2:
-                plt.imshow(data, aspect='auto', origin='lower')
+                plt.imshow(data, aspect='auto', origin='lower', interpolation= 'none')
                 if not limit is None:
                     plt.clim(*limit)
             plt.colorbar()

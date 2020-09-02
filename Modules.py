@@ -125,7 +125,7 @@ class GlowTTS(torch.nn.Module):
 
         if hp.Device != '-1': torch.cuda.synchronize()
 
-        return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, classified_Speakers
+        return z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, attentions, classified_Speakers
 
     def inference(
         self,
@@ -217,7 +217,7 @@ class GlowTTS(torch.nn.Module):
         masks: [Batch, Token_t, Mel_t]
         '''
         batch, token_Time, mel_Time = masks.size()
-        durations = torch.cumsum(durations, dim= 1)        
+        durations = torch.cumsum(durations, dim= 1)
         paths = self.Mask_Generate(
             lengths= durations.view(-1),
             max_lengths= mel_Time,
@@ -241,7 +241,12 @@ class Encoder(torch.nn.Module):
             embedding_dim= hp.Encoder.Channels,
             )
         
-        torch.nn.init.xavier_uniform_(self.layer_Dict['Embedding'].weight)
+        # torch.nn.init.xavier_uniform_(self.layer_Dict['Embedding'].weight)
+        torch.nn.init.normal_(
+            self.layer_Dict['Embedding'].weight,
+            mean= 0.0,
+            std= hp.Encoder.Channels ** -0.5
+            )
         self.layer_Dict['Prenet'] = Prenet(hp.Encoder.Prenet.Stacks)
         self.layer_Dict['Transformer'] = Transformer(hp.Encoder.Transformer.Stacks)
 
@@ -267,6 +272,12 @@ class Encoder(torch.nn.Module):
             [hp.Sound.Mel_Dim, hp.Sound.Mel_Dim],
             dim= 1
             )
+
+        if not speakers is None:
+            speakers = speakers.detach()
+        if not prosodies is None:
+            prosodies = prosodies.detach()
+
         log_Durations = self.layer_Dict['Duration_Predictor'](x.detach(), mask, speakers, prosodies)
 
         return mean, log_Std, log_Durations, mask
@@ -977,7 +988,6 @@ class Conv1d(torch.nn.Conv1d):
         gains = self.w_init_gain
         if isinstance(gains, str):
             gains = [gains]
-        
         
         weights = torch.chunk(self.weight, len(gains), dim= 0)
         for gain, weight in zip(gains, weights):
