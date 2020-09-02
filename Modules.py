@@ -7,6 +7,9 @@ from RPR_MHA import RPR_Multihead_Attention
 with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
+from Modules_BAK import Encoder
+
+
 class GlowTTS(torch.nn.Module):
     def __init__(self):
         super(GlowTTS, self).__init__()
@@ -126,7 +129,7 @@ class GlowTTS(torch.nn.Module):
         return paths
 
 
-class Encoder(torch.nn.Module): 
+class Encoder_Old(torch.nn.Module): 
     def __init__(self):
         super(Encoder, self).__init__()
 

@@ -14,7 +14,7 @@ Sound:
 
 Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut310/glow-tts/tree/master/monotonic_align'.
 
-Mode: 'PE'    #Vanilla, SE, PE, GR
+Mode: 'Vanilla'    #Vanilla, SE, PE, GR
 
 Encoder:
     Channels: 192
@@ -51,7 +51,7 @@ Decoder:
 
 # SE or GR modes
 Speaker_Embedding:
-    Type: 'LUT'    #LUT, GE2E
+    Type: null # 'LUT'    #LUT, GE2E
     Num_Speakers: 8  # If using SE mode, only lut uses. If using GR mode, always used.
     Embedding_Size: 256
     GE2E:
@@ -83,11 +83,13 @@ Prosody_Encoder:
 Speaker_Classifier_GR:
     Channels: [256]
 
-Token_Path: 'C:/Pattern/24K.Pattern.LJCMUA/Token.yaml'
+# Token_Path: 'C:/Pattern/24K.Pattern.LJCMUA/Token.yaml'
+Token_Path: 'C:/Pattern/24K.Pattern.LJ/Token.yaml'
 Train:
     Use_Pattern_Cache: true
     Train_Pattern:
-        Path: 'C:/Pattern/24K.Pattern.LJCMUA/Train'
+        # Path: 'C:/Pattern/24K.Pattern.LJCMUA/Train'
+        Path: 'C:/Pattern/24K.Pattern.LJ/Train'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
@@ -97,7 +99,8 @@ Train:
             Max: 200
         Accumulated_Dataset_Epoch: 1   # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
-        Path: 'C:/Pattern/24K.Pattern.LJCMUA/Eval'
+        # Path: 'C:/Pattern/24K.Pattern.LJCMUA/Eval'
+        Path: 'C:/Pattern/24K.Pattern.LJ/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
@@ -123,11 +126,14 @@ Train:
     Evaluation_Interval: 1000
     Inference_Interval: 1000
     Initial_Inference: false
-    Inference_Pattern_File_in_Train: 'Inference_Text_for_PE.txt'
+    Inference_Pattern_File_in_Train: 'Inference_Text_for_Vanilla.txt'
 
 Inference_Batch_Size: 16 #null
-Inference_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Log'
+# Inference_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Inference'
+# Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Checkpoint'
+# Log_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Log'
+Inference_Path: 'D:/GlowTTS.Results/SR24K.Encoder.LJ/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.Encoder.LJ/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR24K.Encoder.LJ/Log'
 Use_Mixed_Precision: true  # apex is required.
 Device: '0'

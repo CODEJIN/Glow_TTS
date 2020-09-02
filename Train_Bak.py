@@ -5,7 +5,7 @@ from tqdm import tqdm
 from collections import defaultdict
 from tensorboardX import SummaryWriter
 import matplotlib
-# matplotlib.use('agg')
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import sample
@@ -169,8 +169,8 @@ class Trainer:
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
         speakers = speakers.to(device)
-        # mels_for_ge2e = mels_for_ge2e.to(device)
-        # pitches = pitches.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
 
         z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, _, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
@@ -255,8 +255,8 @@ class Trainer:
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
         speakers = speakers.to(device)
-        # mels_for_ge2e = mels_for_ge2e.to(device)
-        # pitches = pitches.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
 
         z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, attentions_from_Train, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
@@ -341,11 +341,11 @@ class Trainer:
     def Inference_Step(self, tokens, token_lengths, mels_for_prosody, mel_lengths_for_prosody, speakers, mels_for_ge2e, pitches, pitch_lengths, length_scales, labels, texts, start_index= 0, tag_step= False, tag_index= False):
         tokens = tokens.to(device)
         token_lengths = token_lengths.to(device)
-        # mels_for_prosody = mels_for_prosody.to(device)
-        # mel_lengths_for_prosody = mel_lengths_for_prosody.to(device)
-        # speakers = speakers.to(device)
-        # mels_for_ge2e = mels_for_ge2e.to(device)
-        # pitches = pitches.to(device)
+        mels_for_prosody = mels_for_prosody.to(device)
+        mel_lengths_for_prosody = mel_lengths_for_prosody.to(device)
+        speakers = speakers.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
         length_scales = length_scales.to(device)
 
         mels, attentions = self.model_Dict['GlowTTS'].inference(

@@ -26,6 +26,7 @@ def Token_Stack(tokens):
         [np.pad(token, [0, max_Token_Length - token.shape[0]], constant_values= token_Dict['<E>']) for token in tokens],
         axis= 0
         )
+        
     return tokens
 
 def Mel_Stack(mels):
@@ -111,10 +112,8 @@ class Dataset(torch.utils.data.Dataset):
         self.cache_Dict = {}
 
     def __getitem__(self, idx):
-        idx = idx % self.base_Length
-
-        if idx in self.cache_Dict.keys():
-            return self.cache_Dict[idx]
+        if (idx % self.base_Length) in self.cache_Dict.keys():
+            return self.cache_Dict[idx % self.base_Length]
 
         file = self.file_List[idx]
         path = os.path.join(self.pattern_Path, file).replace('\\', '/')
@@ -122,7 +121,7 @@ class Dataset(torch.utils.data.Dataset):
         pattern = Text_to_Token(pattern_Dict['Text']), pattern_Dict['Mel'], pattern_Dict['Speaker_ID'], pattern_Dict['Pitch']
 
         if self.use_cache:
-            self.cache_Dict[idx] = pattern
+            self.cache_Dict[idx % self.base_Length] = pattern
         
         return pattern
 
