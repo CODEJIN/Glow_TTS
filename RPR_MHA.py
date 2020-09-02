@@ -51,8 +51,7 @@ class RPR_Multihead_Attention(torch.nn.Module):
             out_channels= out_channels,
             kernel_size= 1
             )
-        torch.nn.init.xavier_uniform_(self.layer_Dict['Projection'].weight)
-
+        
         self.layer_Dict['Dropout'] = torch.nn.Dropout(
             p= dropout_rate
             )
