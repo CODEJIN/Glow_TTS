@@ -11,7 +11,8 @@ from scipy.io import wavfile
 from random import sample
 
 from Logger import Logger
-from Modules import GlowTTS, MLE_Loss
+# from Modules import GlowTTS, MLE_Loss
+from Modules_BAK2 import GlowTTS, MLE_Loss
 from Datasets import Dataset, Inference_Dataset, Collater, Inference_Collater
 from Noam_Scheduler import Modified_Noam_Scheduler
 from Radam import RAdam

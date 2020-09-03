@@ -441,3 +441,4 @@ if __name__ == '__main__':
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -bc2013 "D:\Pattern\ENG\BC2013" -cmua "D:\Pattern\ENG\CMUA" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS" -text
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -text
+# python Pattern_Generator.py -lj /home/heejo/data/Eng/LJSpeech-1.1 -text

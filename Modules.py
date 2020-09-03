@@ -7,9 +7,6 @@ from RPR_MHA import RPR_Multihead_Attention
 with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
-from Modules_BAK import Encoder as Encoder_New, Decoder as Decoder_New
-
-
 class GlowTTS(torch.nn.Module):
     def __init__(self):
         super(GlowTTS, self).__init__()
@@ -24,7 +21,7 @@ class GlowTTS(torch.nn.Module):
             torch.nn.init.uniform_(self.layer_Dict['LUT'].weight, -0.1, 0.1)
 
         self.layer_Dict['Encoder'] = Encoder()
-        self.layer_Dict['Decoder'] = Decoder_New()
+        self.layer_Dict['Decoder'] = Decoder()
         self.layer_Dict['Maximum_Path_Generater'] = Maximum_Path_Generater()
 
     def forward(
@@ -706,6 +703,29 @@ class Maximum_Path_Generater(torch.nn.Module):
                 token_Index = max(0, token_Index - 1)
 
         return path
+
+
+class Conv1d(torch.nn.Conv1d):
+    def __init__(self, w_init_gain= 'relu', *args, **kwargs):
+        self.w_init_gain = w_init_gain
+        super(Conv1d, self).__init__(*args, **kwargs)
+
+    def reset_parameters(self):
+        gains = self.w_init_gain
+        if isinstance(gains, str):
+            gains = [gains]
+
+        weights = torch.chunk(self.weight, len(gains), dim= 0)
+        for gain, weight in zip(gains, weights):
+            if gain == 'zero':
+                torch.nn.init.zeros_(weight)
+            elif gain in ['relu', 'leaky_relu']:
+                torch.nn.init.kaiming_uniform_(weight, nonlinearity= gain)
+            else:
+                torch.nn.init.xavier_uniform_(weight, gain= torch.nn.init.calculate_gain(gain))
+
+        if not self.bias is None:
+            torch.nn.init.zeros_(self.bias)
 
 
 class MLE_Loss(torch.nn.modules.loss._Loss):
