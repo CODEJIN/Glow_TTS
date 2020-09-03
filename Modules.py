@@ -7,7 +7,7 @@ from RPR_MHA import RPR_Multihead_Attention
 with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
-from Modules_BAK import Encoder
+from Modules_BAK import Encoder as Encoder_New, Decoder as Decoder_New
 
 
 class GlowTTS(torch.nn.Module):
@@ -24,7 +24,7 @@ class GlowTTS(torch.nn.Module):
             torch.nn.init.uniform_(self.layer_Dict['LUT'].weight, -0.1, 0.1)
 
         self.layer_Dict['Encoder'] = Encoder()
-        self.layer_Dict['Decoder'] = Decoder()
+        self.layer_Dict['Decoder'] = Decoder_New()
         self.layer_Dict['Maximum_Path_Generater'] = Maximum_Path_Generater()
 
     def forward(
@@ -129,7 +129,7 @@ class GlowTTS(torch.nn.Module):
         return paths
 
 
-class Encoder_Old(torch.nn.Module): 
+class Encoder(torch.nn.Module): 
     def __init__(self):
         super(Encoder, self).__init__()
 
