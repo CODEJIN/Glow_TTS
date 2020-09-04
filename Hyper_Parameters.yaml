@@ -129,11 +129,8 @@ Train:
     Inference_Pattern_File_in_Train: 'Inference_Text_for_Vanilla.txt'
 
 Inference_Batch_Size: 16 #null
-# Inference_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Inference'
-# Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Checkpoint'
-# Log_Path: 'D:/GlowTTS.Results/SR24K.PE.LJCMUA/Log'
-Inference_Path: 'D:/GlowTTS.Results/SR24K.Encoder.LJ/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.Encoder.LJ/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR24K.Encoder.LJ/Log'
+Inference_Path: 'D:/GlowTTS.Results/SR24K.Vanilla.LJ/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.Vanilla.LJ/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR24K.Vanilla.LJ/Log'
 Use_Mixed_Precision: true  # apex is required.
 Device: '0'

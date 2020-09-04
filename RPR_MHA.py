@@ -57,7 +57,7 @@ class RPR_Multihead_Attention(torch.nn.Module):
             )
 
         if not relative_postion_clipping_distance is None:
-            num_Head_Weight = 1 if share_relative_postion_weight else num_heasds
+            num_Head_Weight = 1 if share_relative_postion_weight else num_heads
             weight_STD = self.calc_channels_per_head ** -0.5
             self.weight_K = torch.nn.Parameter(
                 torch.randn(num_Head_Weight, relative_postion_clipping_distance * 2 + 1, self.calc_channels_per_head) * weight_STD
