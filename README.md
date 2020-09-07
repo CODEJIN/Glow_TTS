@@ -45,7 +45,7 @@
 | X      | | O      | | LibriTTS  | https://openslr.org/60/                         |
 
 # Hyper parameters
-Before proceeding, please set the pattern, inference, and checkpoint paths in 'Hyper_Parameter.yaml' according to your environment.
+Before proceeding, please set the pattern, inference, and checkpoint paths in 'Hyper_Parameters.yaml' according to your environment.
 
 * Sound
     * Setting basic sound parameters.
@@ -130,12 +130,21 @@ At least, one or more of datasets must be used.
     * Set the path of VCTK. VCTK's patterns are generated.
 * -libri <path>
     * Set the path of LibriTTS. LibriTTS's patterns are generated.
+* -vc1 <path>
+    * Set the path of VoxCeleb1. Glow-TTS does not supports this because VoxCeleb datasets do not have text data.
+* -vc2 <path>
+    * Set the path of VoxCeleb2. Glow-TTS does not supports this because VoxCeleb datasets do not have text data.
+* -vc1t <path>
+    * Set the path of VoxCeleb1 testset. Glow-TTS does not supports this because VoxCeleb datasets do not have text data.
 * -text
     * Set whether the text information save or not.
     * This is for other model. To use in Glow TTS, this option must be set.
-* -eval
+* -evalr
     * Set the evaluation pattern ratio.
     * Default is `0.001`.
+* -evalm
+    * Set the evaluation pattern minimum of each speaker.
+    * Default is `1`.
 * -mw
     * The number of threads used to create the pattern
     * Default is `10`.
@@ -154,8 +163,31 @@ python Train.py -s <int>
 
 # Result
 
-* Now training....
+* https://codejin.github.io/Glow_TTS_Demo/index.html
 
 # Trained checkpoint
 
-* Now training....
+| Mode    | Dataset            | Is worked?|
+|---------|--------------------|-----------|
+| Vanilla | Single speaker(LJ) | &check;   |
+| SE      | LJ + CUMA          | &check;   |
+| PE      | LJ + CUMA          | &check;   |
+| SE      | LJ + VCTK          | Failed    |
+| SE      | VCTK               | Failed    |
+| PE      | LJ + VCTK          |           |
+
+
+# Testing list
+
+* Currently, LUT is trainable. But I will test with untrainable LUT.
+
+| Mode    | Dataset            | Is worked?|
+|---------|--------------------|-----------|
+| Vanilla | Single speaker(LJ) | &check;   |
+| SE+LUT  | LJ + CUMA          | &check;   |
+| PE      | LJ + CUMA          | &check;   |
+| SE+LUT  | LJ + VCTK          | Failed    |
+| SE+LUT  | VCTK               | Failed    |
+| PE      | LJ + VCTK          | Failed    |
+| SE      | LJ + VCTK + Libri  | Failed    |
+

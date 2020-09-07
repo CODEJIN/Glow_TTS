@@ -5,7 +5,7 @@ import yaml, logging, math
 class RPR_Multihead_Attention(torch.nn.Module):
     def __init__(
         self,
-        in_channels,
+        query_channels,
         calc_channels,
         out_channels,
         num_heads,
@@ -13,7 +13,9 @@ class RPR_Multihead_Attention(torch.nn.Module):
         share_relative_postion_weight= True,
         proximal_bias= False,
         block_mask_length= None,
-        dropout_rate= 0.0
+        dropout_rate= 0.0,
+        key_channels= None,
+        value_channels= None,
         ):
         assert calc_channels % num_heads == 0, 'calc_channels must be dividable by num_heads.'
 
@@ -26,17 +28,17 @@ class RPR_Multihead_Attention(torch.nn.Module):
 
         self.layer_Dict = torch.nn.ModuleDict()        
         self.layer_Dict['Query'] = torch.nn.Conv1d(
-            in_channels= in_channels,
+            in_channels= query_channels,
             out_channels= calc_channels,
             kernel_size= 1
             )
         self.layer_Dict['Key'] = torch.nn.Conv1d(
-            in_channels= in_channels,
+            in_channels= key_channels or query_channels,
             out_channels= calc_channels,
             kernel_size= 1
             )
         self.layer_Dict['Value'] = torch.nn.Conv1d(
-            in_channels= in_channels,
+            in_channels= value_channels or key_channels or query_channels,
             out_channels= calc_channels,
             kernel_size= 1
             )
@@ -49,13 +51,13 @@ class RPR_Multihead_Attention(torch.nn.Module):
             out_channels= out_channels,
             kernel_size= 1
             )
-
+        
         self.layer_Dict['Dropout'] = torch.nn.Dropout(
             p= dropout_rate
             )
 
         if not relative_postion_clipping_distance is None:
-            num_Head_Weight = 1 if share_relative_postion_weight else num_heasds
+            num_Head_Weight = 1 if share_relative_postion_weight else num_heads
             weight_STD = self.calc_channels_per_head ** -0.5
             self.weight_K = torch.nn.Parameter(
                 torch.randn(num_Head_Weight, relative_postion_clipping_distance * 2 + 1, self.calc_channels_per_head) * weight_STD
@@ -74,7 +76,7 @@ class RPR_Multihead_Attention(torch.nn.Module):
         assert not self.proximal_bias or (keys is None and values is None), 'Proximal bias is for self-attention.'
         assert self.block_mask_length is None or (keys is None and values is None), 'Block mask is for self-attention.'
 
-        keys = keys or values or queries
+        keys = keys if not keys is None else values if not values is None else queries
         values = values or keys
 
         queries = self.layer_Dict['Query'](queries)

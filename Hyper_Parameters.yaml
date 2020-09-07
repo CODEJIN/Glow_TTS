@@ -3,15 +3,18 @@ Sound:
     Mel_Dim: 80
     Frame_Length: 1024
     Frame_Shift: 256
-    Sample_Rate: 16000
+    Sample_Rate: 24000
     Mel_F_Min: 125
     Mel_F_Max: 7600
     Max_Abs_Mel: 4
     Confidence_Threshold: 0.6
     Gaussian_Smoothing_Sigma: 0.0
-    Quantinized_Pitch_Dim: 256
+    Pitch_Min: 100.0
+    Pitch_Max: 500.0
 
 Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut310/glow-tts/tree/master/monotonic_align'.
+
+Mode: 'PE'    #Vanilla, SE, PE, GR
 
 Encoder:
     Channels: 192
@@ -46,24 +49,10 @@ Decoder:
             Kernel_Size: 5
             Dropout_Rate: 0.05
 
-WaveNet:
-    Residual_Channels: 64
-    ResConvGLU:
-        Blocks: 3
-        Stacks_in_Block: 10
-        Gate_Channels: 128
-        Kernel_Size: 3
-        Skip_Channels: 64
-        Dropout_Rate: 0.0
-    Upsample:
-        Scales: [4, 4, 4, 4]
-        Pad: 2
-    # Checkpoint_Path: null
-    Checkpoint_Path: 'D:/PWGAN.Results/SR16K.Results.VCTKLibri/Checkpoint/S_400000.pkl'
-
+# SE or GR modes
 Speaker_Embedding:
-    Type: 'GE2E'    #null, LUT, GE2E
-    Num_Speakers: 2457  # Only lut uses.
+    Type: 'LUT'    #LUT, GE2E
+    Num_Speakers: 8  # If using SE mode, only lut uses. If using GR mode, always used.
     Embedding_Size: 256
     GE2E:
         LSTM:
@@ -75,30 +64,51 @@ Speaker_Embedding:
             Overlap_Length: 32
         Checkpoint_Path: './Speaker_Embedding/Example_Results/Checkpoint/S_100000.pkl'
 
-Token_Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Token.yaml'
+# PE or GR modes
+Prosody_Encoder:
+    Size: 256
+    Reference_Encoder:
+        Conv:
+            Kernel_Size: [3, 3, 3, 3, 3, 3]
+            Channels: [32, 32, 64, 64, 128, 128]
+            Strides: [2, 2, 2, 2, 2, 2]
+        GRU:
+            Size: 128
+            Stacks: 1
+    Style_Token:
+        Num_Tokens: 128 #10
+        Size: 256
+        Attention_Head: 4
+
+Speaker_Classifier_GR:
+    Channels: [256]
+
+# Unbalencing of
+Token_Path: 'C:/Pattern/24K.Pattern.LJVCTK/Token.yaml'
 Train:
     Use_Pattern_Cache: true
     Train_Pattern:
-        Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Train'
+        Path: 'C:/Pattern/24K.Pattern.LJVCTK/Train'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
-            Max: 700
+            Max: 1000
         Text_Length:
             Min: 10
-            Max: 150
+            Max: 200
         Accumulated_Dataset_Epoch: 1   # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
-        Path: 'C:/Pattern/16K.Pattern.LJVCTKLibri/Eval'
+        Path: 'C:/Pattern/24K.Pattern.LJVCTK/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
-            Max: 700
+            Max: 1000
         Text_Length:
             Min: 10
-            Max: 150
+            Max: 200
     Num_Workers: 4
-    Batch_Size: 128
+    Adversarial_Speaker_Weight: 0.0005
+    Batch_Size: 32  #16 did not work, but 32 did work. I recommend > 32.
     Learning_Rate:
         Initial: 1.0e-3
         Base: 4000     # This is similar warmup step, but no warmup because of radam.
@@ -106,17 +116,20 @@ Train:
         Beta1: 0.9
         Beta2: 0.999
         Epsilon: 1.0e-6
+    Weight_Decay: 1.0e-6
     Gradient_Norm: 5.0
     Max_Step: 400000
     Checkpoint_Save_Interval: 1000
     Logging_Interval: 100
     Evaluation_Interval: 1000
+    Prosody_Check_Interval: 10000   #Only in PE and GR mode
     Inference_Interval: 1000
     Initial_Inference: false
+    Inference_Pattern_File_in_Train: 'Inference_Text_for_PE_LJVCTK.txt'
 
-Inference_Batch_Size: 8 #null
-Inference_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi2/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi2/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR16K.Results.Multi2/Log'
+Inference_Batch_Size: null
+Inference_Path: 'D:/GlowTTS.Results/SR24K.PE_LN_off.LJVCTK/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.PE_LN_off.LJVCTK/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR24K.PE_LN_off.LJVCTK/Log'
 Use_Mixed_Precision: true  # apex is required.
 Device: '0'

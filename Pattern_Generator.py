@@ -9,12 +9,15 @@ from tqdm import tqdm
 from Audio import Audio_Prep, Mel_Generate
 from yin import pitch_calc
 
-with open('Hyper_Parameter.yaml') as f:
-    hp_Dict = yaml.load(f, Loader=yaml.Loader)
+from Arg_Parser import Recursive_Parse
+hp = Recursive_Parse(yaml.load(
+    open('Hyper_Parameters.yaml', encoding='utf-8'),
+    Loader=yaml.Loader
+    ))
 
 using_Extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
 regex_Checker = re.compile('[A-Z,.?!\'\-\s]+')
-top_DB_Dict = {'LJ': 60, 'BC2013': 60, 'VCTK': 15, 'VC1': 23, 'VC2': 23, 'Libri': 23, 'CMUA': 60}  # VC1 and Libri is from 'https://github.com/CorentinJ/Real-Time-Voice-Cloning'
+top_DB_Dict = {'LJ': 60, 'BC2013': 60, 'VCTK': 15, 'VC1': 23, 'VC1T': 23, 'VC2': 23, 'Libri': 23, 'CMUA': 60}  # VC1 and Libri is from 'https://github.com/CorentinJ/Real-Time-Voice-Cloning'
 
 def Text_Filtering(text):
     remove_Letter_List = ['(', ')', '\"', '[', ']', ':', ';']
@@ -38,33 +41,45 @@ def Text_Filtering(text):
 def Pitch_Generate(audio):
     pitch = pitch_calc(
         sig= audio,
-        sr= hp_Dict['Sound']['Sample_Rate'],
-        w_len= hp_Dict['Sound']['Frame_Length'],
-        w_step= hp_Dict['Sound']['Frame_Shift'],
-        confidence_threshold= hp_Dict['Sound']['Confidence_Threshold'],
-        gaussian_smoothing_sigma = hp_Dict['Sound']['Gaussian_Smoothing_Sigma']
+        sr= hp.Sound.Sample_Rate,
+        w_len= hp.Sound.Frame_Length,
+        w_step= hp.Sound.Frame_Shift,
+        f0_min= hp.Sound.Pitch_Min,
+        f0_max= hp.Sound.Pitch_Max,
+        confidence_threshold= hp.Sound.Confidence_Threshold,
+        gaussian_smoothing_sigma = hp.Sound.Gaussian_Smoothing_Sigma
         )
     return (pitch - np.min(pitch)) / (np.max(pitch) - np.min(pitch) + 1e-7)
 
 def Pattern_Generate(path, top_db= 60):
-    audio = Audio_Prep(path, hp_Dict['Sound']['Sample_Rate'], top_db)
+    audio = Audio_Prep(path, hp.Sound.Sample_Rate, top_db)
     mel = Mel_Generate(
         audio= audio,
-        sample_rate= hp_Dict['Sound']['Sample_Rate'],
-        num_frequency= hp_Dict['Sound']['Spectrogram_Dim'],
-        num_mel= hp_Dict['Sound']['Mel_Dim'],
-        window_length= hp_Dict['Sound']['Frame_Length'],
-        hop_length= hp_Dict['Sound']['Frame_Shift'],
-        mel_fmin= hp_Dict['Sound']['Mel_F_Min'],
-        mel_fmax= hp_Dict['Sound']['Mel_F_Max'],
-        max_abs_value= hp_Dict['Sound']['Max_Abs_Mel']
+        sample_rate= hp.Sound.Sample_Rate,
+        num_frequency= hp.Sound.Spectrogram_Dim,
+        num_mel= hp.Sound.Mel_Dim,
+        window_length= hp.Sound.Frame_Length,
+        hop_length= hp.Sound.Frame_Shift,
+        mel_fmin= hp.Sound.Mel_F_Min,
+        mel_fmax= hp.Sound.Mel_F_Max,
+        max_abs_value= hp.Sound.Max_Abs_Mel
         )
     pitch = Pitch_Generate(audio)
 
     return audio, mel, pitch
 
 def Pattern_File_Generate(path, speaker_ID, speaker, dataset, text= None, tag='', eval= False):
-    pattern_Path = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Path']
+    pattern_Path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
+
+    file = '{}.{}{}.PICKLE'.format(
+        speaker if dataset in speaker else '{}.{}'.format(dataset, speaker),
+        '{}.'.format(tag) if tag != '' else '',
+        os.path.splitext(os.path.basename(path))[0]
+        ).upper()
+    file = os.path.join(pattern_Path, dataset, speaker, file).replace("\\", "/")
+
+    if os.path.exists(file):
+        return
 
     try:
         audio, mel, pitch = Pattern_Generate(path, top_DB_Dict[dataset])
@@ -83,13 +98,8 @@ def Pattern_File_Generate(path, speaker_ID, speaker, dataset, text= None, tag=''
         print('Error: {} in {}'.format(e, path))
         return
 
-    file = '{}.{}{}.PICKLE'.format(
-        speaker if dataset in speaker else '{}.{}'.format(dataset, speaker),
-        '{}.'.format(tag) if tag != '' else '',
-        os.path.splitext(os.path.basename(path))[0]
-        ).upper()
 
-    os.makedirs(os.path.join(pattern_Path, dataset).replace('\\', '/'), exist_ok= True)
+    os.makedirs(os.path.join(pattern_Path, dataset, speaker).replace('\\', '/'), exist_ok= True)
     with open(os.path.join(pattern_Path, dataset, file).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_Pattern_Dict, f, protocol=4)
 
@@ -164,7 +174,7 @@ def CMUA_Info_Load(path, use_text= False):
             for line in open(os.path.join(root, 'txt.done.data'), 'r').readlines():
                 file, text, _ = line.strip().split('"')
                 file = file.strip().split(' ')[1]
-                path = os.path.join(root.replace('etc', 'wav'), '{}.wav'.format(file)).replace('\\', '/')                
+                path = os.path.join(root.replace('etc', 'wav'), '{}.wav'.format(file)).replace('\\', '/')
                 text = Text_Filtering(text)
                 if not text is None:
                     text_Dict[path] = text
@@ -241,45 +251,126 @@ def Libri_Info_Load(path, use_text= False):
     print('Libri info generated: {}'.format(len(paths)))
     return paths, text_Dict, speaker_Dict
 
+
+def VC1_Info_Load(path, use_text= False):
+    if use_text:
+        raise ValueError('VC1 does not support the text.')
+
+    paths = []
+    for root, _, files in os.walk(path):
+        for file in files:
+            file = os.path.join(root, file).replace('\\', '/')
+            if not os.path.splitext(file)[1].upper() in using_Extension:
+                continue
+            paths.append(file)
+    
+    speaker_Dict = {
+        path: 'VC1.{}'.format(path.split('/')[-3].upper())
+        for path in paths
+        }
+    tag_Dict = {
+        path: path.split('/')[-2].upper()
+        for path in paths
+        }
+
+    print('VC1 info generated: {}'.format(len(paths)))
+    return paths, speaker_Dict, tag_Dict
+
+def VC2_Info_Load(path, use_text= False):
+    if use_text:
+        raise ValueError('VC2 does not support the text.')
+
+    paths = []
+    for root, _, files in os.walk(path):
+        for file in files:
+            wav_File_Path = os.path.join(root, file).replace('\\', '/')
+            if not os.path.splitext(wav_File_Path)[1].upper() in using_Extension:
+                continue
+            paths.append(wav_File_Path)
+    
+    speaker_Dict = {
+        path: 'VC2.{}'.format(path.split('/')[-3].upper())
+        for path in paths
+        }
+    tag_Dict = {
+        path: path.split('/')[-2].upper()
+        for path in paths
+        }
+
+    print('VC2 info generated: {}'.format(len(paths)))
+    return paths, speaker_Dict, tag_Dict
+
+
+def VC1T_Info_Load(path, use_text= False):
+    if use_text:
+        raise ValueError('VC1-Test does not support the text.')
+
+    paths = []
+    for root, _, files in os.walk(path):
+        for file in files:
+            file = os.path.join(root, file).replace('\\', '/')
+            if not os.path.splitext(file)[1].upper() in using_Extension:
+                continue
+            paths.append(file)
+    
+    speaker_Dict = {
+        path: 'VC1T.{}'.format(path.split('/')[-3].upper())
+        for path in paths
+        }
+    tag_Dict = {
+        path: path.split('/')[-2].upper()
+        for path in paths
+        }
+
+    print('VC1T info generated: {}'.format(len(paths)))
+    return paths, speaker_Dict, tag_Dict
+
+
 def Speaker_Index_Dict_Generate(speaker_Dict):
     return {
         speaker: index
         for index, speaker in enumerate(sorted(set(speaker_Dict.values())))
         }
 
-def Split_Eval(paths, eval_ratio= 0.001):
+def Split_Eval(paths, eval_ratio= 0.001, min_Eval= 1):
     shuffle(paths)
-    index = int(len(paths) * eval_ratio)
+    index = max(int(len(paths) * eval_ratio), min_Eval)
     return paths[index:], paths[:index]
 
 def Metadata_Generate(eval= False, use_text= False):
-    pattern_Path = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Path']
-    metadata_File = hp_Dict['Train']['Eval_Pattern' if eval else 'Train_Pattern']['Metadata_File']
+    pattern_Path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
+    metadata_File = hp.Train.Eval_Pattern.Metadata_File if eval else hp.Train.Train_Pattern.Metadata_File
 
     new_Metadata_Dict = {
-        'Spectrogram_Dim': hp_Dict['Sound']['Spectrogram_Dim'],
-        'Mel_Dim': hp_Dict['Sound']['Mel_Dim'],
-        'Frame_Shift': hp_Dict['Sound']['Frame_Shift'],
-        'Frame_Length': hp_Dict['Sound']['Frame_Length'],
-        'Sample_Rate': hp_Dict['Sound']['Sample_Rate'],
-        'Max_Abs_Mel': hp_Dict['Sound']['Max_Abs_Mel'],
+        'Spectrogram_Dim': hp.Sound.Spectrogram_Dim,
+        'Mel_Dim': hp.Sound.Mel_Dim,
+        'Frame_Shift': hp.Sound.Frame_Shift,
+        'Frame_Length': hp.Sound.Frame_Length,
+        'Sample_Rate': hp.Sound.Sample_Rate,
+        'Max_Abs_Mel': hp.Sound.Max_Abs_Mel,
         'File_List': [],
         'Audio_Length_Dict': {},
         'Mel_Length_Dict': {},
-        'Pitch_Length_Dict': {},        
+        'Pitch_Length_Dict': {},
         'Speaker_ID_Dict': {},
         'Speaker_Dict': {},
         'Dataset_Dict': {},
+        'File_List_by_Speaker_Dict': {},
         }
     if use_text:
         new_Metadata_Dict['Text_Length_Dict'] = {}
+
+    files_TQDM = tqdm(
+        total= sum([len(files) for root, _, files in os.walk(pattern_Path)]),
+        desc= 'Eval_Pattern' if eval else 'Train_Pattern'
+        )
 
     for root, _, files in os.walk(pattern_Path):
         for file in files:
             with open(os.path.join(root, file).replace("\\", "/"), "rb") as f:
                 pattern_Dict = pickle.load(f)
 
-            file = os.path.join(os.path.basename(root), file).replace("\\", "/")
+            file = os.path.join(root, file).replace("\\", "/").replace(pattern_Path, '').lstrip('/')
             try:
                 if not all([
                     key in ('Audio', 'Mel', 'Pitch', 'Speaker_ID', 'Speaker', 'Dataset', 'Text' if use_text else '')
@@ -288,15 +379,19 @@ def Metadata_Generate(eval= False, use_text= False):
                     continue
                 new_Metadata_Dict['Audio_Length_Dict'][file] = pattern_Dict['Audio'].shape[0]
                 new_Metadata_Dict['Mel_Length_Dict'][file] = pattern_Dict['Mel'].shape[0]
-                new_Metadata_Dict['Pitch_Length_Dict'][file] = pattern_Dict['Pitch'].shape[0]                
+                new_Metadata_Dict['Pitch_Length_Dict'][file] = pattern_Dict['Pitch'].shape[0]
                 new_Metadata_Dict['Speaker_ID_Dict'][file] = pattern_Dict['Speaker_ID']
                 new_Metadata_Dict['Speaker_Dict'][file] = pattern_Dict['Speaker']
                 new_Metadata_Dict['Dataset_Dict'][file] = pattern_Dict['Dataset']
                 new_Metadata_Dict['File_List'].append(file)
+                if not pattern_Dict['Speaker'] in new_Metadata_Dict['File_List_by_Speaker_Dict'].keys():
+                    new_Metadata_Dict['File_List_by_Speaker_Dict'][pattern_Dict['Speaker']] = []
+                new_Metadata_Dict['File_List_by_Speaker_Dict'][pattern_Dict['Speaker']].append(file)
                 if use_text:
                     new_Metadata_Dict['Text_Length_Dict'][file] = len(pattern_Dict['Text'])
             except:
                 print('File \'{}\' is not correct pattern file. This file is ignored.'.format(file))
+            files_TQDM.update(1)
 
     with open(os.path.join(pattern_Path, metadata_File.upper()).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_Metadata_Dict, f, protocol= 4)
@@ -308,19 +403,12 @@ def Token_Dict_Generate(text_Dict):
     for text in text_Dict.values():
         tokens = tokens.union(set(text))
 
-    os.makedirs(os.path.dirname(hp_Dict['Token_Path']), exist_ok= True)
+    os.makedirs(os.path.dirname(hp.Token_Path), exist_ok= True)
     #I don't use yaml.dump in this case to sort clearly.
     yaml.dump(
         {token: index for index, token in enumerate(['<S>', '<E>'] + sorted(tokens))},
-        open(hp_Dict['Token_Path'], 'w')
+        open(hp.Token_Path, 'w')
         )
-    
-    # #I don't use yaml.dump in this case to sort clearly.
-    # os.makedirs(os.path.dirname(hp_Dict['Token_Path']), exist_ok= True)
-    # open(hp_Dict['Token_Path'], 'w').write('\n'.join([
-    #     '\'{}\': {}'.format(token, index)
-    #     for index, token in enumerate(['<S>', '<E>'] + sorted(tokens))
-    #     ]))
 
 if __name__ == '__main__':
     argParser = argparse.ArgumentParser()
@@ -329,9 +417,14 @@ if __name__ == '__main__':
     argParser.add_argument("-cmua", "--cmua_path", required=False)
     argParser.add_argument("-vctk", "--vctk_path", required=False)
     argParser.add_argument("-libri", "--libri_path", required=False)
+    argParser.add_argument("-vc1", "--vc1_path", required=False)
+    argParser.add_argument("-vc2", "--vc2_path", required=False)
+
+    argParser.add_argument("-vc1t", "--vc1_test_path", required=False)
     
     argParser.add_argument("-text", "--use_text", action= 'store_true')
-    argParser.add_argument("-eval", "--eval_ratio", default= 0.001, type= float)
+    argParser.add_argument("-evalr", "--eval_ratio", default= 0.001, type= float)
+    argParser.add_argument("-evalm", "--eval_min", default= 1, type= int)
     argParser.add_argument("-mw", "--max_worker", default= 10, required=False, type= int)
 
     args = argParser.parse_args()
@@ -377,6 +470,25 @@ if __name__ == '__main__':
         speaker_Dict.update(libri_Speaker_Dict)
         dataset_Dict.update({path: 'Libri' for path in libri_Paths})
         tag_Dict.update({path: '' for path in libri_Paths})
+    if not args.vc1_path is None:
+        vc1_Paths, vc1_Speaker_Dict, vc1_Tag_Dict = VC1_Info_Load(path= args.vc1_path, use_text= args.use_text)
+        paths.extend(vc1_Paths)
+        speaker_Dict.update(vc1_Speaker_Dict)
+        dataset_Dict.update({path: 'VC1' for path in vc1_Paths})
+        tag_Dict.update(vc1_Tag_Dict)
+    if not args.vc2_path is None:
+        vc2_Paths, vc2_Speaker_Dict, vc2_Tag_Dict = VC2_Info_Load(path= args.vc2_path, use_text= args.use_text)
+        paths.extend(vc2_Paths)
+        speaker_Dict.update(vc2_Speaker_Dict)
+        dataset_Dict.update({path: 'VC2' for path in vc2_Paths})
+        tag_Dict.update(vc2_Tag_Dict)
+
+    if not args.vc1_test_path is None:
+        vc1t_Paths, vc1t_Speaker_Dict, vc1t_Tag_Dict = VC1T_Info_Load(path= args.vc1_test_path, use_text= args.use_text)
+        paths.extend(vc1t_Paths)
+        speaker_Dict.update(vc1t_Speaker_Dict)
+        dataset_Dict.update({path: 'VC1T' for path in vc1t_Paths})
+        tag_Dict.update(vc1t_Tag_Dict)
 
     if len(paths) == 0:
         raise ValueError('Total info count must be bigger than 0.')
@@ -387,7 +499,7 @@ if __name__ == '__main__':
     speaker_Index_Dict = Speaker_Index_Dict_Generate(speaker_Dict)
 
     train_Paths, eval_Paths = Split_Eval(paths, args.eval_ratio)
-    
+
     with PE(max_workers = args.max_worker) as pe:
         for _ in tqdm(            
             pe.map(
@@ -432,7 +544,8 @@ if __name__ == '__main__':
     Metadata_Generate(eval= True, use_text= args.use_text)
 
 
-
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -bc2013 "D:\Pattern\ENG\BC2013" -cmua "D:\Pattern\ENG\CMUA" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS"
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -vctk "D:\Pattern\ENG\VCTK" -libri "D:\Pattern\ENG\LibriTTS" -text
 # python Pattern_Generator.py -lj "D:\Pattern\ENG\LJSpeech" -text
+# python Pattern_Generator.py -lj /home/heejo/data/Eng/LJSpeech-1.1 -text
+# python Pattern_Generator.py -vc2 "D:\Pattern\ENG\VC2" -mw 1

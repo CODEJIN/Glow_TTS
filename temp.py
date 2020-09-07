@@ -29,18 +29,43 @@
 
 
 
-t_align = torch.randn(3, 43, 277)
-a = torch.cat((torch.ones((t_align.shape[1], t_align.shape[0], 1), device=t_align.device)*-500, t_align.transpose(1, 0)), dim=2)
+# t_align = torch.randn(3, 43, 277)
+# a = torch.cat((torch.ones((t_align.shape[1], t_align.shape[0], 1), device=t_align.device)*-500, t_align.transpose(1, 0)), dim=2)
 
-target = list()
-max_mel_len = int(max(x_lengths))
-for length_mel_row in x_lengths:
-    target.append(np.pad([i+1 for i in range(int(length_mel_row))],
-                        (0, max_mel_len-int(length_mel_row)), 'constant', constant_values=int(length_mel_row)))
-target = np.array(target)
+# target = list()
+# max_mel_len = int(max(x_lengths))
+# for length_mel_row in x_lengths:
+#     target.append(np.pad([i+1 for i in range(int(length_mel_row))],
+#                         (0, max_mel_len-int(length_mel_row)), 'constant', constant_values=int(length_mel_row)))
+# target = np.array(target)
 
-target = torch.from_numpy(target).to(t_align.device)
+# target = torch.from_numpy(target).to(t_align.device)
 
 
-print(a.shape)
-print(target.shape)
+# print(a.shape)
+# print(target.shape)
+
+
+# import keyword
+# import torch
+# meta = []
+# while len(meta)<1000:
+#     meta = meta+keyword.kwlist # get some strings
+# meta = meta[:1000]
+# print(meta)
+
+# from tensorboardX import SummaryWriter
+# writer = SummaryWriter("my_experiment")
+# # writer.add_embedding(torch.randn(100, 5), metadata=meta, label_img=label_img, global_step=0)
+# # writer.add_embedding(torch.randn(100, 5), label_img=label_img, global_step=0)
+# writer.add_embedding(torch.randn(1000, 128), metadata=meta, global_step=0)
+# writer.flush()
+# writer.add_embedding(torch.randn(1000, 128), metadata=meta, global_step=10000)
+# writer.flush()
+# writer.close()
+
+import pickle
+
+path = 'C:/Pattern/24K.Pattern.LJCMUA/Eval/METADATA.PICKLE'
+x = pickle.load(open(path, 'rb'))
+print(x)
