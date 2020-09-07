@@ -25,7 +25,7 @@ class GlowTTS(torch.nn.Module):
                     num_embeddings= hp.Speaker_Embedding.Num_Speakers,
                     embedding_dim= hp.Speaker_Embedding.Embedding_Size,
                     )
-                torch.nn.init.uniform_(self.layer_Dict['LUT'].weight, -0.1, 0.1)
+                torch.nn.init.uniform_(self.layer_Dict['LUT'].weight, -1.0, 1.0)
             elif hp.Speaker_Embedding.Type.upper() == 'GE2E':
                 self.layer_Dict['GE2E'] = GE2E(
                     mel_dims= hp.Sound.Mel_Dim,
@@ -204,7 +204,7 @@ class GlowTTS(torch.nn.Module):
 
         mels.masked_fill_(mel_Masks == 0.0, -hp.Sound.Max_Abs_Mel)
 
-        return mels, attentions
+        return mels, mel_Lengths, attentions
 
     def Mask_Generate(self, lengths, max_lengths= None, dtype= torch.float):
         '''
@@ -627,10 +627,10 @@ class CRND(torch.nn.Module):
         self.layer_Dict['ReLU'] = torch.nn.ReLU(
             inplace= True
             )
-        self.layer_Dict['LayerNorm'] = torch.nn.LayerNorm(
-            hp.Encoder.Duration_Predictor.Channels,
-            eps= 1e-4
-            )
+        # self.layer_Dict['LayerNorm'] = torch.nn.LayerNorm(
+        #     hp.Encoder.Duration_Predictor.Channels,
+        #     eps= 1e-4
+        #     )
         self.layer_Dict['Dropout'] = torch.nn.Dropout(
             p= hp.Encoder.Duration_Predictor.Dropout_Rate
             )
@@ -638,7 +638,7 @@ class CRND(torch.nn.Module):
     def forward(self, x, mask):
         x = self.layer_Dict['Conv'](x * mask)   # [Batch, Dim, Time]
         x = self.layer_Dict['ReLU'](x)
-        x = self.layer_Dict['LayerNorm'](x.transpose(2, 1)).transpose(2, 1)
+        # x = self.layer_Dict['LayerNorm'](x.transpose(2, 1)).transpose(2, 1)
         x = self.layer_Dict['Dropout'](x)
 
         return x

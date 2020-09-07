@@ -5,14 +5,14 @@ from tqdm import tqdm
 from collections import defaultdict
 from tensorboardX import SummaryWriter
 import matplotlib
-# matplotlib.use('agg')
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import sample
 
 from Logger import Logger
 from Modules import GlowTTS, MLE_Loss
-from Datasets import Dataset, Inference_Dataset, Collater, Inference_Collater
+from Datasets import Dataset, Inference_Dataset, Prosody_Check_Dataset, Collater, Inference_Collater, Prosody_Check_Collater
 from Noam_Scheduler import Modified_Noam_Scheduler
 from Radam import RAdam
 
@@ -122,6 +122,24 @@ class Trainer:
             pin_memory= True
             )
 
+        if hp.Mode in ['PE', 'GR']:
+            self.dataLoader_Dict['Prosody_Check'] = torch.utils.data.DataLoader(
+                dataset= Prosody_Check_Dataset(
+                    pattern_path= hp.Train.Train_Pattern.Path,
+                    metadata_file= hp.Train.Train_Pattern.Metadata_File,
+                    mel_length_min= hp.Train.Train_Pattern.Mel_Length.Min,
+                    mel_length_max= hp.Train.Train_Pattern.Mel_Length.Max,
+                    use_cache = hp.Train.Use_Pattern_Cache
+                    ),
+                shuffle= False,
+                collate_fn= Prosody_Check_Collater(),
+                batch_size= hp.Train.Batch_Size,
+                num_workers= hp.Train.Num_Workers,
+                pin_memory= True
+                )
+
+
+
     def Model_Generate(self):
         self.model_Dict = {
             'GlowTTS': GlowTTS().to(device)
@@ -169,8 +187,8 @@ class Trainer:
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
         speakers = speakers.to(device)
-        # mels_for_ge2e = mels_for_ge2e.to(device)
-        # pitches = pitches.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
 
         z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, _, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
@@ -255,8 +273,8 @@ class Trainer:
         mels = mels.to(device)
         mel_lengths = mel_lengths.to(device)
         speakers = speakers.to(device)
-        # mels_for_ge2e = mels_for_ge2e.to(device)
-        # pitches = pitches.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
 
         z, mel_Mean, mel_Log_Std, log_Dets, log_Durations, log_Duration_Targets, attentions_from_Train, classified_Speakers = self.model_Dict['GlowTTS'](
             tokens= tokens,
@@ -285,7 +303,7 @@ class Trainer:
 
 
         # For tensorboard images
-        mels, attentions_from_Inference = self.model_Dict['GlowTTS'].inference(
+        mels, _, attentions_from_Inference = self.model_Dict['GlowTTS'].inference(
             tokens= tokens,
             token_lengths= token_lengths,
             mels_for_prosody= mels,
@@ -336,19 +354,21 @@ class Trainer:
         for model in self.model_Dict.values():
             model.train()
 
+        if hp.Mode in ['PE', 'GR'] and self.steps % hp.Train.Prosody_Check_Interval == 0:
+            self.Prosody_Check_Epoch()
 
     @torch.no_grad()
     def Inference_Step(self, tokens, token_lengths, mels_for_prosody, mel_lengths_for_prosody, speakers, mels_for_ge2e, pitches, pitch_lengths, length_scales, labels, texts, start_index= 0, tag_step= False, tag_index= False):
         tokens = tokens.to(device)
         token_lengths = token_lengths.to(device)
-        # mels_for_prosody = mels_for_prosody.to(device)
-        # mel_lengths_for_prosody = mel_lengths_for_prosody.to(device)
-        # speakers = speakers.to(device)
-        # mels_for_ge2e = mels_for_ge2e.to(device)
-        # pitches = pitches.to(device)
+        mels_for_prosody = mels_for_prosody.to(device)
+        mel_lengths_for_prosody = mel_lengths_for_prosody.to(device)
+        speakers = speakers.to(device)
+        mels_for_ge2e = mels_for_ge2e.to(device)
+        pitches = pitches.to(device)
         length_scales = length_scales.to(device)
 
-        mels, attentions = self.model_Dict['GlowTTS'].inference(
+        mels, mel_Lengths, attentions = self.model_Dict['GlowTTS'].inference(
             tokens= tokens,
             token_lengths= token_lengths,
             mels_for_prosody= mels_for_prosody,
@@ -369,22 +389,26 @@ class Trainer:
             files.append('.'.join(tags))
 
         os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'PNG').replace('\\', '/'), exist_ok= True)
-        for index, (mel, attention, label, text, length_Scale, file) in enumerate(zip(
+        for index, (mel, mel_Length, attention, label, text, length_Scale, file) in enumerate(zip(
             mels.cpu().numpy(),
+            mel_Lengths.cpu().numpy(),
             attentions.cpu().numpy(),
             labels,
             texts,
             length_scales,
             files
             )):
+            mel = mel[:, :mel_Length]
+            attention = attention[:len(text) + 2, :mel_Length]
+            
             new_Figure = plt.figure(figsize=(20, 5 * 3), dpi=100)
             plt.subplot2grid((3, 1), (0, 0))
             plt.imshow(mel, aspect='auto', origin='lower')
-            plt.title('Mel    Label: {}    Text: {}    Length scale: {:.3f}'.format(label, text if len(text) < 90 else text[:90] + '…', length_Scale))
+            plt.title('Mel    Label: {}    Text: {}    Length scale: {:.3f}'.format(label, text if len(text) < 70 else text[:70] + '…', length_Scale))
             plt.colorbar()
             plt.subplot2grid((3, 1), (1, 0), rowspan= 2)
-            plt.imshow(attention[:len(text) + 2], aspect='auto', origin='lower', interpolation= 'none')
-            plt.title('Attention    Label: {}    Text: {}    Length scale: {:.3f}'.format(label, text if len(text) < 90 else text[:90] + '…', length_Scale))
+            plt.imshow(attention, aspect='auto', origin='lower', interpolation= 'none')
+            plt.title('Attention    Label: {}    Text: {}    Length scale: {:.3f}'.format(label, text if len(text) < 70 else text[:70] + '…', length_Scale))
             plt.yticks(
                 range(len(text) + 2),
                 ['<S>'] + list(text) + ['<E>'],
@@ -399,10 +423,14 @@ class Trainer:
         os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', 'Mel').replace('\\', '/'), exist_ok= True)
         os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', 'Attention').replace('\\', '/'), exist_ok= True)
         
-        for index, (mel, file) in enumerate(zip(
+        for index, (mel, mel_Length, file) in enumerate(zip(
             mels.cpu().numpy(),
+            mel_Lengths.cpu().numpy(),
             files
             )):
+            mel = mel[:, :mel_Length]
+            attention = attention[:len(text) + 2, :mel_Length]
+
             np.save(
                 os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'NPY', 'Mel', file).replace('\\', '/'),
                 mel.T,
@@ -450,6 +478,43 @@ class Trainer:
 
         for model in self.model_Dict.values():
             model.train()
+
+    
+    @torch.no_grad()
+    def Prosody_Check_Step(self, mels, mel_lengths):
+        mels = mels.to(device)
+        mel_lengths = mel_lengths.to(device)
+        prosodies = self.model_Dict['GlowTTS'].layer_Dict['Prosody_Encoder'](mels, mel_lengths)
+
+        return prosodies
+
+    def Prosody_Check_Epoch(self):
+        logging.info('(Steps: {}) Start prosody check.'.format(self.steps))
+
+        for model in self.model_Dict.values():
+            model.eval()
+
+        prosodies, labels = zip(*[
+            (self.Prosody_Check_Step(mels, mel_Lengths), labels)
+            for mels, mel_Lengths, labels in tqdm(
+                self.dataLoader_Dict['Prosody_Check'],
+                desc='[Prosody_Check]',
+                total= math.ceil(len(self.dataLoader_Dict['Prosody_Check'].dataset) / hp.Train.Batch_Size)
+                )
+            ])
+        prosodies = torch.cat(prosodies, dim=0)
+        labels = [label for sub_labels in labels for label in sub_labels]
+
+        self.writer_Dict['Evaluation'].add_embedding(
+            prosodies.cpu().numpy(),
+            metadata= labels,
+            global_step= self.steps,
+            tag= 'Prosodies'
+            )
+
+        for model in self.model_Dict.values():
+            model.train()
+
 
 
     def Load_Checkpoint(self):

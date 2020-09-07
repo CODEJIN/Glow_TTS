@@ -14,7 +14,7 @@ Sound:
 
 Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut310/glow-tts/tree/master/monotonic_align'.
 
-Mode: 'Vanilla'    #Vanilla, SE, PE, GR
+Mode: 'PE'    #Vanilla, SE, PE, GR
 
 Encoder:
     Channels: 192
@@ -51,7 +51,7 @@ Decoder:
 
 # SE or GR modes
 Speaker_Embedding:
-    Type: null # 'LUT'    #LUT, GE2E
+    Type: 'LUT'    #LUT, GE2E
     Num_Speakers: 8  # If using SE mode, only lut uses. If using GR mode, always used.
     Embedding_Size: 256
     GE2E:
@@ -64,7 +64,7 @@ Speaker_Embedding:
             Overlap_Length: 32
         Checkpoint_Path: './Speaker_Embedding/Example_Results/Checkpoint/S_100000.pkl'
 
-# PE or GRL modes
+# PE or GR modes
 Prosody_Encoder:
     Size: 256
     Reference_Encoder:
@@ -76,20 +76,19 @@ Prosody_Encoder:
             Size: 128
             Stacks: 1
     Style_Token:
-        Num_Tokens: 10
+        Num_Tokens: 128 #10
         Size: 256
         Attention_Head: 4
 
 Speaker_Classifier_GR:
     Channels: [256]
 
-# Token_Path: 'C:/Pattern/24K.Pattern.LJCMUA/Token.yaml'
-Token_Path: 'C:/Pattern/24K.Pattern.LJ/Token.yaml'
+# Unbalencing of
+Token_Path: 'C:/Pattern/24K.Pattern.LJVCTK/Token.yaml'
 Train:
     Use_Pattern_Cache: true
     Train_Pattern:
-        # Path: 'C:/Pattern/24K.Pattern.LJCMUA/Train'
-        Path: 'C:/Pattern/24K.Pattern.LJ/Train'
+        Path: 'C:/Pattern/24K.Pattern.LJVCTK/Train'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
@@ -99,8 +98,7 @@ Train:
             Max: 200
         Accumulated_Dataset_Epoch: 1   # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
-        # Path: 'C:/Pattern/24K.Pattern.LJCMUA/Eval'
-        Path: 'C:/Pattern/24K.Pattern.LJ/Eval'
+        Path: 'C:/Pattern/24K.Pattern.LJVCTK/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Mel_Length:
             Min: 50
@@ -110,7 +108,7 @@ Train:
             Max: 200
     Num_Workers: 4
     Adversarial_Speaker_Weight: 0.0005
-    Batch_Size: 128
+    Batch_Size: 32  #16 did not work, but 32 did work. I recommend > 32.
     Learning_Rate:
         Initial: 1.0e-3
         Base: 4000     # This is similar warmup step, but no warmup because of radam.
@@ -124,13 +122,14 @@ Train:
     Checkpoint_Save_Interval: 1000
     Logging_Interval: 100
     Evaluation_Interval: 1000
+    Prosody_Check_Interval: 10000   #Only in PE and GR mode
     Inference_Interval: 1000
     Initial_Inference: false
-    Inference_Pattern_File_in_Train: 'Inference_Text_for_Vanilla.txt'
+    Inference_Pattern_File_in_Train: 'Inference_Text_for_PE_LJVCTK.txt'
 
-Inference_Batch_Size: 16 #null
-Inference_Path: 'D:/GlowTTS.Results/SR24K.Vanilla.LJ/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.Vanilla.LJ/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR24K.Vanilla.LJ/Log'
+Inference_Batch_Size: null
+Inference_Path: 'D:/GlowTTS.Results/SR24K.PE_LN_off.LJVCTK/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.PE_LN_off.LJVCTK/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR24K.PE_LN_off.LJVCTK/Log'
 Use_Mixed_Precision: true  # apex is required.
 Device: '0'

@@ -338,8 +338,8 @@ def Split_Eval(paths, eval_ratio= 0.001, min_Eval= 1):
     return paths[index:], paths[:index]
 
 def Metadata_Generate(eval= False, use_text= False):
-    pattern_Path = hp.Train.Eval_Pattern.Path if eval else hp.Train_Pattern.Path
-    metadata_File = hp.Train.Eval_Pattern.Metadata_File if eval else hp.Train_Pattern.Metadata_File
+    pattern_Path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
+    metadata_File = hp.Train.Eval_Pattern.Metadata_File if eval else hp.Train.Train_Pattern.Metadata_File
 
     new_Metadata_Dict = {
         'Spectrogram_Dim': hp.Sound.Spectrogram_Dim,

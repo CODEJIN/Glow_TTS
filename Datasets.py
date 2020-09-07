@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import yaml, pickle, os, math, logging
-from random import shuffle
+from random import shuffle, sample
 
 from Pattern_Generator import Pattern_Generate, Text_Filtering
 
@@ -165,6 +165,62 @@ class Inference_Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.pattern_List)
 
+class Prosody_Check_Dataset(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        pattern_path,
+        metadata_file,
+        check_speakers= 50,
+        sample_per_speaker= 100,
+        mel_length_min= -math.inf,
+        mel_length_max= math.inf,
+        use_cache = False
+        ):
+        if check_speakers > 50:
+            logging.warn('Maximum number of color labels in TensorBoard is 50. The visualization may be restricted.')
+        super(Prosody_Check_Dataset, self).__init__()
+
+        self.pattern_Path = pattern_path
+        self.use_cache = use_cache
+
+        metadata_Dict = pickle.load(open(
+            os.path.join(pattern_path, metadata_file).replace('\\', '/'),
+            mode= 'rb'
+            ))
+
+        self.file_List = [
+            file
+            for file_List in sample(
+                list(metadata_Dict['File_List_by_Speaker_Dict'].values()),
+                min(check_speakers, len(metadata_Dict['File_List_by_Speaker_Dict']))
+                )
+            for file in sample(file_List, sample_per_speaker)
+            if all([
+                metadata_Dict['Mel_Length_Dict'][file] >= mel_length_min,
+                metadata_Dict['Mel_Length_Dict'][file] <= mel_length_max
+                ])
+            ]
+            
+        self.cache_Dict = {}
+
+    def __getitem__(self, idx):
+        if idx in self.cache_Dict.keys():
+            return self.cache_Dict[idx]
+
+        file = self.file_List[idx]
+        path = os.path.join(self.pattern_Path, file).replace('\\', '/')
+        pattern_Dict = pickle.load(open(path, 'rb'))
+        pattern = pattern_Dict['Mel'], pattern_Dict['Speaker']
+
+        if self.use_cache:
+            self.cache_Dict[idx] = pattern
+        
+        return pattern
+
+    def __len__(self):
+        return len(self.file_List)
+
+
 
 class Collater:
     def __call__(self, batch):
@@ -217,6 +273,20 @@ class Inference_Collater:
         length_Scales = torch.FloatTensor(length_Scales)    # [Batch]
         
         return tokens, token_Lengths, mels_for_Prosody, mel_Lengths_for_Prosody, speakers, mels_for_GE2E, pitches, pitch_Lengths, length_Scales, labels, texts
+
+class Prosody_Check_Collater:
+    def __call__(self, batch):
+        mels, labels = zip(*batch)
+        
+        mel_Lengths = [mel.shape[0] for mel in mels]
+        mels = Mel_Stack(mels)
+        
+        mels = torch.FloatTensor(mels).transpose(2, 1)   # [Batch, Mel_dim, Time]
+        mel_Lengths = torch.LongTensor(mel_Lengths)   # [Batch]
+        
+        return mels, mel_Lengths, labels
+
+
 
 # if __name__ == '__main__':
 #     dataset = Dev_Dataset()
