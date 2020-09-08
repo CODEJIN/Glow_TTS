@@ -83,8 +83,8 @@ class GlowTTS(torch.nn.Module):
         else:
             prosodies = None
 
-        if 'Pitch_Quantinizer' in self.layer_Dict.keys():
-            pitches = self.layer_Dict['Pitch_Quantinizer'](pitches)
+        if 'Pitch_Interpolater' in self.layer_Dict.keys():
+            pitches = self.layer_Dict['Pitch_Interpolater'](pitches)
         else:
             pitches = None
 

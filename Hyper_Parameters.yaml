@@ -122,7 +122,7 @@ Train:
     Checkpoint_Save_Interval: 1000
     Logging_Interval: 100
     Evaluation_Interval: 1000
-    Prosody_Check_Interval: 10000   #Only in PE and GR mode
+    Prosody_Check_Interval: 5000   #Only in PE and GR mode
     Inference_Interval: 1000
     Initial_Inference: false
     Inference_Pattern_File_in_Train: 'Inference_Text_for_PE_LJVCTK.txt'
