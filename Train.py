@@ -213,7 +213,7 @@ class Trainer:
         loss = loss_Dict['Total']
         if not classified_Speakers is None:
             loss_Dict['Speaker'] = self.criterion_Dict['CE'](classified_Speakers, speakers)
-            loss += loss_Dict['Speaker']
+            loss = loss_Dict['Total'] + loss_Dict['Speaker']
 
         self.optimizer.zero_grad()
         if hp.Use_Mixed_Precision:
