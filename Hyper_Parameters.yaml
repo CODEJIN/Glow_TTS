@@ -17,7 +17,7 @@ Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut3
 Mode: 'GR'    #Vanilla, SE, PE, GR
 
 Encoder:
-    Channels: 256
+    Channels: 256   # Basic is 192
     Embedding_Tokens: 35
     Prenet: # Conv -> Norm -> ReLU -> Dropout
         Kernel_Size: 5
@@ -107,7 +107,7 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 4
-    Adversarial_Speaker_Weight: 0.005
+    Adversarial_Speaker_Weight: 0.0005
     Batch_Size: 32  #16 did not work, but 32 did work. I recommend > 32.
     Learning_Rate:
         Initial: 1.0e-3
@@ -125,11 +125,11 @@ Train:
     Prosody_Check_Interval: 5000   #Only in PE and GR mode
     Inference_Interval: 1000
     Initial_Inference: false
-    Inference_Pattern_File_in_Train: 'Inference_Text_for_GR_LJVCTK.txt'
+    Inference_Pattern_File_in_Train: 'Inference_Text_for_GR_LUT_LJVCTK.txt'
 
 Inference_Batch_Size: null
-Inference_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW005.LJVCTK/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW005.LJVCTK/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW005.LJVCTK/Log'
+Inference_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW0005.LJVCTK/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW0005.LJVCTK/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW0005.LJVCTK/Log'
 Use_Mixed_Precision: true  # apex is required.
-Device: '0'
+Device: '1'
