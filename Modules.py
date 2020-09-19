@@ -83,15 +83,13 @@ class GlowTTS(torch.nn.Module):
         else:
             prosodies = None
 
-        if 'Pitch_Quantinizer' in self.layer_Dict.keys():
-            pitches = self.layer_Dict['Pitch_Quantinizer'](pitches)
-        else:
-            pitches = None
-
         if 'Speaker_Classifier_GR' in self.layer_Dict.keys():
             classified_Speakers = self.layer_Dict['Speaker_Classifier_GR'](prosodies)
         else:
             classified_Speakers = None
+
+        if not 'Pitch_Interpolater' in self.layer_Dict.keys():
+            pitches = None
 
         if hp.Device != '-1': torch.cuda.synchronize()
 
@@ -191,7 +189,6 @@ class GlowTTS(torch.nn.Module):
         if hp.Device != '-1': torch.cuda.synchronize()
 
         z = (mel_Mean + torch.exp(mel_Log_Std) * noises) * mel_Masks
-        
 
         if 'Pitch_Interpolater' in self.layer_Dict.keys():
             pitches = self.layer_Dict['Pitch_Interpolater'](pitches, pitch_lengths, mel_Lengths)
@@ -301,8 +298,7 @@ class Decoder(torch.nn.Module):
     def forward(self, x, mask, speakers= None, prosodies= None, pitches= None, reverse= False):
         x, squeezed_Mask = self.layer_Dict['Squeeze'](x, mask)
         if not pitches is None:
-            pitches, _ = self.layer_Dict['Squeeze'](pitches, mask)
-
+            pitches, _ = self.layer_Dict['Squeeze'](pitches.unsqueeze(1), mask)
         log_Dets = []
         for flow in  reversed(self.layer_Dict['Flows']) if reverse else self.layer_Dict['Flows']:
             x, logdet = flow(x, squeezed_Mask, speakers, prosodies, pitches, reverse= reverse)
@@ -406,7 +402,7 @@ class Pitch_Interpolater(torch.nn.Module):
             for pitch in pitches
             ])
         
-        return pitches.unsqueeze(1) #[Batch, 1, Pitch_t]
+        return pitches #[Batch, Pitch_t]
 
 class Speaker_Classifier_GR(torch.nn.Module):
     def __init__(self):
@@ -583,11 +579,16 @@ class Duration_Predictor(torch.nn.Module):
         self.layer_Dict = torch.nn.ModuleDict()
 
         previous_Channels = hp.Encoder.Channels
-        if hp.Mode.upper() in ['SE', 'GR']:
+        
+        if hp.Mode.upper() == 'SE':
             previous_Channels += hp.Speaker_Embedding.Embedding_Size
-        if hp.Mode.upper() in ['PE', 'GR']:
+        elif hp.Mode.upper() == 'PE':
             previous_Channels += hp.Prosody_Encoder.Size
-
+        elif hp.Mode.upper() == 'GR':
+            assert hp.Speaker_Embedding.Embedding_Size == hp.Prosody_Encoder.Size, \
+                'In GR mode, the size of speaker embeding and prosody encoder must be same.'
+            previous_Channels += hp.Speaker_Embedding.Embedding_Size
+        
         for index in range(hp.Encoder.Duration_Predictor.Stacks):
             self.layer_Dict['CRND_{}'.format(index)] = CRND(in_channels= previous_Channels)
             previous_Channels = hp.Encoder.Duration_Predictor.Channels
@@ -601,10 +602,13 @@ class Duration_Predictor(torch.nn.Module):
     def forward(self, x, x_mask, speakers= None, prosodies= None):
         step = x.size(2)
         x = [x]
-        if not speakers is None:
-            x.append(speakers.unsqueeze(2).expand(-1, -1, step))
-        if not prosodies is None:
-            x.append(prosodies.unsqueeze(2).expand(-1, -1, step))
+        
+        if any([not speakers is None, not prosodies is None]):
+            conditions = 0
+            conditions += speakers if not speakers is None else 0
+            conditions += prosodies if not prosodies is None else 0
+            x.append(conditions.unsqueeze(2).expand(-1, -1, step))
+
         x = torch.cat(x, dim= 1)
 
         for index in range(hp.Encoder.Duration_Predictor.Stacks):
