@@ -1,4 +1,4 @@
-# Glow TTS
+# Multispeaker GlowTTS
 
 * This code is a replication of [official Glow TTS code](https://github.com/jaywalnut310/glow-tts). If you want to use Glow TTS model, I recommend that you refer to the official code.
 * The following is the paper I referred:
@@ -10,6 +10,13 @@
         * [Wan, L., Wang, Q., Papir, A., & Moreno, I. L. (2017). Generalized end-to-end loss for speaker verification. arXiv preprint arXiv:1710.10467.](https://arxiv.org/pdf/1710.10467)
         * [Jia, Y., Zhang, Y., Weiss, R. J., Wang, Q., Shen, J., Ren, F., ... & Wu, Y. (2018). Transfer Learning from Speaker Verification to Multispeaker Text-To-Speech Synthesis. arXiv preprint arXiv:1806.04558.](http://papers.nips.cc/paper/7700-transfer-learning-from-speaker-verification-to-multispeaker-text-to-speech-synthesis.pdf)
         * [Qian, K., Zhang, Y., Chang, S., Yang, X., & Hasegawa-Johnson, M. (2019). Zero-shot voice style transfer with only autoencoder loss. arXiv preprint arXiv:1905.05879.](https://arxiv.org/pdf/1905.05879)
+
+    * Prosody encoder (Global style token layer)
+        * [Wang, Y., Stanton, D., Zhang, Y., Skerry-Ryan, R. J., Battenberg, E., Shor, J., ... & Saurous, R. A. (2018). Style tokens: Unsupervised style modeling, control and transfer in end-to-end speech synthesis. arXiv preprint arXiv:1803.09017.](https://arxiv.org/abs/1803.09017)
+
+    * Gradient reversal layer
+        * [Zhang, Y., Weiss, R. J., Zen, H., Wu, Y., Chen, Z., Skerry-Ryan, R. J., ... & Ramabhadran, B. (2019). Learning to speak fluently in a foreign language: Multilingual speech synthesis and cross-language voice cloning. arXiv preprint arXiv:1907.04448.](https://arxiv.org/abs/1907.04448)
+        * [Jung, S., & Kim, H. (2020). Pitchtron: Towards audiobook generation from ordinary people's voices. arXiv preprint arXiv:2005.10456.](https://arxiv.org/abs/2005.10456)
 
 # Requirements
 
@@ -23,13 +30,57 @@
 
 # Structure
 
-* `Speaker embedding` is optional.
+## Vanilla mode (Single speaker GlowTTS)
 
-## Training
-<img src='./Figures/Training.png' width=100% height=100% />
+<details>
+<summary></summary>
 
-## Inference
-<img src='./Figures/Inference.png' width=81% height=81% />
+### Training
+<img src='./Figures/Vanilla_GlowTTS_Training.svg' width=50% />
+
+### Inference
+<img src='./Figures/Vanilla_GlowTTS_Inference.svg' width=41.5% />
+</details>
+
+
+
+
+
+## Speaker embedding mode
+
+<details>
+<summary></summary>
+
+### Training
+<img src='./Figures/SE_GlowTTS_Training.svg' width=50% />
+
+### Inference
+<img src='./Figures/SE_GlowTTS_Inference.svg' width=41.5% />
+</details>
+
+## Prosody encoding mode (GST GlowTTS)
+
+<details>
+<summary></summary>
+
+### Training
+<img src='./Figures/PE_GlowTTS_Training.svg' width=50% />
+
+### Inference
+<img src='./Figures/PE_GlowTTS_Inference.svg' width=41.5% />
+</details>
+
+## Gradient reversal mode (Voice cloning GlowTTS - Failed)
+
+<details>
+<summary></summary>
+
+### Training
+<img src='./Figures/GR_GlowTTS_Training.svg' width=50% />
+
+### Inference
+<img src='./Figures/GR_GlowTTS_Inference.svg' width=42.5% />
+</details>
 
 # Used dataset
 
@@ -163,31 +214,23 @@ python Train.py -s <int>
 
 # Result
 
-* https://codejin.github.io/Glow_TTS_Demo/index.html
+[Please see at the demo site](https://codejin.github.io/Glow_TTS_Demo/index.html)
 
 # Trained checkpoint
 
-| Mode    | Dataset            | Is worked?|
-|---------|--------------------|-----------|
-| Vanilla | Single speaker(LJ) | &check;   |
-| SE      | LJ + CUMA          | &check;   |
-| PE      | LJ + CUMA          | &check;   |
-| SE      | LJ + VCTK          | Failed    |
-| SE      | VCTK               | Failed    |
-| PE      | LJ + VCTK          |           |
+| Mode      | Dataset            | Trained steps | Link                                                                                               |
+|-----------|--------------------|---------------|----------------------------------------------------------------------------------------------------|
+| Vanilla   | LJ                 | 100000        | [Link](https://drive.google.com/file/d/1uBpwMWE5PYA04-voepPEJ7utDXfESOaU/view?usp=sharing)         |
+| SE & LUT  | LJ + CUMA          | 100000        | [Link](https://drive.google.com/file/d/1HS_UEMSD4mu5djtatzYcl1rWbCrbE6Yq/view?usp=sharing)         |
+| SE & LUT  | LJ + VCTK          | 100000        | [Link](https://drive.google.com/file/d/114z-cSEJHs8DdnIKnEE8pthIME6FprSM/view?usp=sharing)         |
+| PE        | LJ + CUMA          | 100000        | [Link](https://drive.google.com/file/d/1Mbz20T1yWuhQcT1RIH5u0j0aM0nqHO19/view?usp=sharing)         |
+| PE        | LJ + VCTK          | 400000        | [Link](https://drive.google.com/file/d/1pt7xJb5jR_rtVI4amdLz3dNQGe3PlaLF/view?usp=sharing)         |
+| GR & LUT  | LJ + VCTK          | 400000        | [Link(Failed)](https://drive.google.com/file/d/1vRU_M-bbzFmBOt8_pDTcrwHhPsaB08Wa/view?usp=sharing) |
 
 
-# Testing list
+# Future works
 
-* Currently, LUT is trainable. But I will test with untrainable LUT.
-
-| Mode    | Dataset            | Is worked?|
-|---------|--------------------|-----------|
-| Vanilla | Single speaker(LJ) | &check;   |
-| SE+LUT  | LJ + CUMA          | &check;   |
-| PE      | LJ + CUMA          | &check;   |
-| SE+LUT  | LJ + VCTK          | Failed    |
-| SE+LUT  | VCTK               | Failed    |
-| PE      | LJ + VCTK          | Failed    |
-| SE      | LJ + VCTK + Libri  | Failed    |
+* Training with GE2E speaker embedding
+* Gradient reversal model structure improvement
+* Training additional steps
 

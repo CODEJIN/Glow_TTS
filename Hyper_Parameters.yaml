@@ -14,10 +14,10 @@ Sound:
 
 Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut310/glow-tts/tree/master/monotonic_align'.
 
-Mode: 'GR'    #Vanilla, SE, PE, GR
+Mode: 'PE'    #Vanilla, SE, PE, GR
 
 Encoder:
-    Channels: 256   # Basic is 192
+    Channels: 192   # Basic is 192, GR was 256
     Embedding_Tokens: 35
     Prenet: # Conv -> Norm -> ReLU -> Dropout
         Kernel_Size: 5
@@ -125,11 +125,12 @@ Train:
     Prosody_Check_Interval: 5000   #Only in PE and GR mode
     Inference_Interval: 1000
     Initial_Inference: false
-    Inference_Pattern_File_in_Train: 'Inference_Text_for_GR_LUT_LJVCTK.txt'
+    # Inference_Pattern_File_in_Train: 'Inference_Text_for_GR_LUT_LJVCTK.txt'
+    Inference_Pattern_File_in_Train: 'Inference_Text_for_PE_LJVCTK.txt'
 
 Inference_Batch_Size: null
-Inference_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW0005.LJVCTK/Inference'
-Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW0005.LJVCTK/Checkpoint'
-Log_Path: 'D:/GlowTTS.Results/SR24K.GR_LUT.ASW0005.LJVCTK/Log'
-Use_Mixed_Precision: true  # apex is required.
-Device: '1'
+Inference_Path: 'D:/GlowTTS.Results/SR24K.PE.LJVCTK/Inference'
+Checkpoint_Path: 'D:/GlowTTS.Results/SR24K.PE.LJVCTK/Checkpoint'
+Log_Path: 'D:/GlowTTS.Results/SR24K.PE.LJVCTK/Log'
+Use_Mixed_Precision: false  # apex is required.
+Device: '0'
