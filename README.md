@@ -67,7 +67,7 @@
 <img src='./Figures/PE_GlowTTS_Training.svg' width=50% />
 
 ### Inference
-<img src='./Figures/PE_GlowTTS_Inference.svg' width=41.5% />
+<img src='./Figures/PE_GlowTTS_Inference.svg' width=43% />
 </details>
 
 ## Gradient reversal mode (Voice cloning GlowTTS - Failed)
@@ -79,7 +79,7 @@
 <img src='./Figures/GR_GlowTTS_Training.svg' width=50% />
 
 ### Inference
-<img src='./Figures/GR_GlowTTS_Inference.svg' width=42.5% />
+<img src='./Figures/GR_GlowTTS_Inference.svg' width=43% />
 </details>
 
 # Used dataset
@@ -91,9 +91,9 @@
 |--------|-|--------|-|-----------|-------------------------------------------------|
 | O      | | O      | | LJSpeech  | https://keithito.com/LJ-Speech-Dataset/         |
 | X      | | X      | | BC2013    | http://www.cstr.ed.ac.uk/projects/blizzard/     |
-| X      | | X      | | CMU Arctic| http://www.festvox.org/cmu_arctic/index.html    |
+| X      | | O      | | CMU Arctic| http://www.festvox.org/cmu_arctic/index.html    |
 | X      | | O      | | VCTK      | https://datashare.is.ed.ac.uk/handle/10283/2651 |
-| X      | | O      | | LibriTTS  | https://openslr.org/60/                         |
+| X      | | X      | | LibriTTS  | https://openslr.org/60/                         |
 
 # Hyper parameters
 Before proceeding, please set the pattern, inference, and checkpoint paths in 'Hyper_Parameters.yaml' according to your environment.
