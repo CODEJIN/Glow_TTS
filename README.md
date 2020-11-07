@@ -212,6 +212,12 @@ python Train.py -s <int>
     * Default is 0.
     * When this parameter is 0, model try to find the latest checkpoint in checkpoint path.
 
+# Inference
+
+* Please check example files for the inference
+    * [Inference_Example.ipynb](Inference_Example.ipynb)
+    * [Inference.py](Inference.py)
+
 # Result
 
 [Please see at the demo site](https://codejin.github.io/Glow_TTS_Demo/index.html)
@@ -220,7 +226,7 @@ python Train.py -s <int>
 
 | Mode      | Dataset            | Trained steps | Link                                                                                               |
 |-----------|--------------------|---------------|----------------------------------------------------------------------------------------------------|
-| Vanilla   | LJ                 | 100000        | [Link](https://drive.google.com/file/d/1uBpwMWE5PYA04-voepPEJ7utDXfESOaU/view?usp=sharing)         |
+| Vanilla   | LJ                 | 100000        | [Link(Broken)](https://drive.google.com/file/d/1uBpwMWE5PYA04-voepPEJ7utDXfESOaU/view?usp=sharing) |
 | SE & LUT  | LJ + CUMA          | 100000        | [Link](https://drive.google.com/file/d/1HS_UEMSD4mu5djtatzYcl1rWbCrbE6Yq/view?usp=sharing)         |
 | SE & LUT  | LJ + VCTK          | 100000        | [Link](https://drive.google.com/file/d/114z-cSEJHs8DdnIKnEE8pthIME6FprSM/view?usp=sharing)         |
 | PE        | LJ + CUMA          | 100000        | [Link](https://drive.google.com/file/d/1Mbz20T1yWuhQcT1RIH5u0j0aM0nqHO19/view?usp=sharing)         |

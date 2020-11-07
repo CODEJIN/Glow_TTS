@@ -35,9 +35,9 @@ else:
     torch.cuda.set_device(0)
 
 logging.basicConfig(
-        level=logging.INFO, stream=sys.stdout,
-        format= '%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s'
-        )
+    level=logging.INFO, stream=sys.stdout,
+    format= '%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s'
+    )
 
 if hp.Use_Mixed_Precision:
     try:
@@ -442,27 +442,6 @@ class Trainer:
                 allow_pickle= False
                 )
 
-        # if 'PWGAN' in self.model_Dict.keys():
-        #     os.makedirs(os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
-
-        #     noises = torch.randn(mels.size(0), mels.size(2) * hp.Sound.Frame_Shift).to(device)
-        #     mels = torch.nn.functional.pad(
-        #         mels,
-        #         pad= (hp.WaveNet.Upsample.Pad, hp.WaveNet.Upsample.Pad),
-        #         mode= 'replicate'
-        #         )
-        #     mels.clamp_(min= -hp.Sound.Max_Abs_Mel, max= hp.Sound.Max_Abs_Mel)            
-
-        #     for index, (audio, file) in enumerate(zip(
-        #         self.model_Dict['PWGAN'](noises, mels).cpu().numpy(),
-        #         files
-        #         )):
-        #         wavfile.write(
-        #             filename= os.path.join(hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV', '{}.wav'.format(file)).replace('\\', '/'),
-        #             data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
-        #             rate= hp.Sound.Sample_Rate
-        #             )
-
     def Inference_Epoch(self):
         logging.info('(Steps: {}) Start inference.'.format(self.steps))
 
@@ -550,8 +529,6 @@ class Trainer:
 
         logging.info('Checkpoint loaded at {} steps.'.format(self.steps))
 
-        # if not hp.WaveNet.Checkpoint_Path is None:
-        #     self.PWGAN_Load_Checkpoint()
         if 'GE2E' in self.model_Dict['GlowTTS'].layer_Dict.keys() and self.steps == 0:
             self.GE2E_Load_Checkpoint()
 
@@ -574,15 +551,6 @@ class Trainer:
             )
 
         logging.info('Checkpoint saved at {} steps.'.format(self.steps))
-
-    def PWGAN_Load_Checkpoint(self):
-        state_Dict = torch.load(
-            hp.WaveNet.Checkpoint_Path,
-            map_location= 'cpu'
-            )
-        self.model_Dict['PWGAN'].load_state_dict(state_Dict['Model.Generator'])
-
-        logging.info('PWGAN checkpoint \'{}\' loaded.'.format(hp.WaveNet.Checkpoint_Path))
 
     def GE2E_Load_Checkpoint(self):
         state_Dict = torch.load(

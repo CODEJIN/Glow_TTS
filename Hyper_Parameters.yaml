@@ -14,7 +14,8 @@ Sound:
 
 Use_Cython_Alignment: true  # If true, model uses 'https://github.com/jaywalnut310/glow-tts/tree/master/monotonic_align'.
 
-Mode: 'PE'    #Vanilla, SE, PE, GR
+# Mode: 'PE'    #Vanilla, SE, PE, GR
+Mode: 'SE'    #Vanilla, SE, PE, GR
 
 Encoder:
     Channels: 192   # Basic is 192, GR was 256
@@ -84,7 +85,7 @@ Speaker_Classifier_GR:
     Channels: [256]
 
 # Unbalencing of
-Token_Path: 'C:/Pattern/24K.Pattern.LJVCTK/Token.yaml'
+Token_Path: 'E:/24K.Pattern.LJVCTKLibri/Token.yaml'
 Train:
     Use_Pattern_Cache: true
     Train_Pattern:
