@@ -969,7 +969,7 @@ class Maximum_Path_Generater(torch.nn.Module):
                         prev_Q = -1e+7
                 else:
                     prev_Q = x[token_Index - 1, mel_Index - 1]  # Moved to next token
-            x[token_Index, mel_Index] = max(current_Q, prev_Q) + x[token_Index, mel_Index]
+                x[token_Index, mel_Index] = max(current_Q, prev_Q) + x[token_Index, mel_Index]
 
         token_Index = token_length - 1
         for mel_Index in range(mel_length - 1, -1, -1):
